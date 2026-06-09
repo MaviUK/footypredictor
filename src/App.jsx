@@ -8,6 +8,12 @@ const RESULT_LABELS = {
   A: 'Away win',
 }
 
+const RESULT_GROUPS = [
+  ['H', 'Home'],
+  ['D', 'Draw'],
+  ['A', 'Away'],
+]
+
 const TABLE_COLUMNS = [
   ['played', 'P'],
   ['won', 'W'],
@@ -215,19 +221,7 @@ function App() {
                   <TeamBlock side="Away" team={game.currentRound.away} />
                 </div>
 
-                <div className="option-grid compact-options">
-                  {game.currentRound.options.map((option) => (
-                    <button
-                      type="button"
-                      key={`${option.homeGoals}-${option.awayGoals}`}
-                      onClick={() => submitPrediction(option)}
-                      disabled={submitting}
-                    >
-                      <strong>{option.homeGoals}-{option.awayGoals}</strong>
-                      <small>{RESULT_LABELS[option.result]}</small>
-                    </button>
-                  ))}
-                </div>
+                <ResultChoices options={game.currentRound.options} submitting={submitting} submitPrediction={submitPrediction} />
               </article>
 
               <aside className="panel score-panel compact-score-panel">
@@ -287,11 +281,8 @@ function TeamBlock({ side, team }) {
 }
 
 function LeagueLine({ snapshot }) {
-  const hasFullTable = TABLE_COLUMNS.some(([key]) => snapshot[key] !== undefined && snapshot[key] !== null && snapshot[key] !== '')
-
   return (
     <div className="league-strip compact-league-strip" aria-label="League table line before this fixture">
-      {!hasFullTable && <p className="table-note">Re-run importer for full table stats.</p>}
       <div className="league-labels">
         <span>Pos</span>
         {TABLE_COLUMNS.map(([, label]) => <span key={label}>{label}</span>)}
@@ -302,6 +293,31 @@ function LeagueLine({ snapshot }) {
           <span key={label}>{displayValue(snapshot[key])}</span>
         ))}
       </div>
+    </div>
+  )
+}
+
+function ResultChoices({ options, submitting, submitPrediction }) {
+  return (
+    <div className="option-grid result-columns">
+      {RESULT_GROUPS.map(([result, label]) => {
+        const resultOptions = options.filter((option) => option.result === result).slice(0, 2)
+        return (
+          <div className="result-column" key={result}>
+            <span className="result-column-label">{label}</span>
+            {resultOptions.map((option) => (
+              <button
+                type="button"
+                key={`${option.homeGoals}-${option.awayGoals}`}
+                onClick={() => submitPrediction(option)}
+                disabled={submitting}
+              >
+                <strong>{option.homeGoals}-{option.awayGoals}</strong>
+              </button>
+            ))}
+          </div>
+        )
+      })}
     </div>
   )
 }
