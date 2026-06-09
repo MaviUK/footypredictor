@@ -69,11 +69,13 @@ export async function handler(event) {
 
     if (roundsResult.error) throw roundsResult.error
 
+    const roundIds = roundsResult.data.map((round) => round.id)
+
     const predictionsResult = await supabase
       .from('predictions')
       .select('*')
       .eq('user_id', user.id)
-      .in('daily_game_fixture_id', roundsResult.data.map((round) => round.id))
+      .in('daily_game_fixture_id', roundIds)
 
     if (predictionsResult.error) throw predictionsResult.error
 
@@ -87,14 +89,30 @@ export async function handler(event) {
 
     const leaderboardResult = await supabase
       .from('predictions')
-      .select('user_id, points, exact_score, correct_result, user_profiles(email)')
-      .in('daily_game_fixture_id', roundsResult.data.map((round) => round.id))
+      .select('user_id, points, exact_score, correct_result')
+      .in('daily_game_fixture_id', roundIds)
 
     if (leaderboardResult.error) throw leaderboardResult.error
 
+    const leaderboardUserIds = [...new Set(leaderboardResult.data.map((row) => row.user_id))]
+    const profilesResult = leaderboardUserIds.length
+      ? await supabase
+        .from('user_profiles')
+        .select('user_id, email')
+        .in('user_id', leaderboardUserIds)
+      : { data: [], error: null }
+
+    if (profilesResult.error) throw profilesResult.error
+
+    const emailByUserId = new Map(profilesResult.data.map((profile) => [profile.user_id, profile.email]))
     const leaderboardMap = new Map()
+
     for (const row of leaderboardResult.data) {
-      const current = leaderboardMap.get(row.user_id) || { userId: row.user_id, email: row.user_profiles?.email, totalPoints: 0 }
+      const current = leaderboardMap.get(row.user_id) || {
+        userId: row.user_id,
+        email: emailByUserId.get(row.user_id),
+        totalPoints: 0,
+      }
       current.totalPoints += row.points
       leaderboardMap.set(row.user_id, current)
     }
