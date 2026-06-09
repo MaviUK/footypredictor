@@ -135,13 +135,10 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="hero">
+      <section className="hero compact-hero">
         <p className="eyebrow">Daily Season Predictor</p>
-        <h1>Play one mystery Premier League season every day.</h1>
-        <p>
-          Everyone gets the same hidden season. Work through 38 randomly ordered fixtures,
-          use the table and form clues, then pick the correct score from six choices.
-        </p>
+        <h1>One mystery Premier League season.</h1>
+        <p>Use the table and form clues. Pick the score from six choices.</p>
       </section>
 
       {error && <p className="alert">{error}</p>}
@@ -192,7 +189,7 @@ function App() {
 
       {session && (
         <>
-          <nav className="topbar">
+          <nav className="topbar compact-topbar">
             <span>{session.user.email}</span>
             <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
           </nav>
@@ -201,24 +198,24 @@ function App() {
 
           {!loading && game?.currentRound && (
             <section className="game-layout">
-              <article className="panel fixture-panel">
+              <article className="panel fixture-panel compact-fixture">
                 <div className="round-meta">
-                  <span>Round {game.currentRound.roundNumber} of {game.totalRounds}</span>
+                  <span>Round {game.currentRound.roundNumber}/{game.totalRounds}</span>
                   <strong>{game.season.displayName}</strong>
                 </div>
 
-                <div className="match-title">
+                <div className="match-title compact-match-title">
                   <h2>{game.currentRound.home.name}</h2>
                   <span>v</span>
                   <h2>{game.currentRound.away.name}</h2>
                 </div>
 
-                <div className="scoreboard">
+                <div className="scoreboard compact-scoreboard">
                   <TeamBlock side="Home" team={game.currentRound.home} />
                   <TeamBlock side="Away" team={game.currentRound.away} />
                 </div>
 
-                <div className="option-grid">
+                <div className="option-grid compact-options">
                   {game.currentRound.options.map((option) => (
                     <button
                       type="button"
@@ -233,15 +230,10 @@ function App() {
                 </div>
               </article>
 
-              <aside className="panel score-panel">
+              <aside className="panel score-panel compact-score-panel">
                 <p className="eyebrow">Your score</p>
                 <h2>{game.userScore.totalPoints} pts</h2>
-                <p>
-                  Correct scores: {game.userScore.correctScores} · Correct results: {game.userScore.correctResults}
-                </p>
-                <p className="muted">
-                  Right score = 3 points. Right result only = 1 point. Wrong = 0.
-                </p>
+                <p>{game.userScore.correctScores} exact · {game.userScore.correctResults} results</p>
               </aside>
             </section>
           )}
@@ -278,7 +270,7 @@ function TeamBlock({ side, team }) {
   const snapshot = team.snapshot || {}
 
   return (
-    <section className="team-card">
+    <section className="team-card compact-team-card">
       <div className="team-heading">
         <span>{side}</span>
         <h3>{team.name}</h3>
@@ -286,23 +278,26 @@ function TeamBlock({ side, team }) {
 
       <LeagueLine snapshot={snapshot} />
 
-      <div className="form-area">
-        <FormStrip label="Last 5" value={snapshot.form} />
-        <FormStrip label={`${side} form`} value={snapshot.venueForm} />
+      <div className="form-area compact-form-area">
+        <FormStrip label="Form" value={snapshot.form} />
+        <FormStrip label={side === 'Home' ? 'Home' : 'Away'} value={snapshot.venueForm} />
       </div>
     </section>
   )
 }
 
 function LeagueLine({ snapshot }) {
+  const hasFullTable = TABLE_COLUMNS.some(([key]) => snapshot[key] !== undefined && snapshot[key] !== null && snapshot[key] !== '')
+
   return (
-    <div className="league-strip" aria-label="League table line before this fixture">
+    <div className="league-strip compact-league-strip" aria-label="League table line before this fixture">
+      {!hasFullTable && <p className="table-note">Re-run importer for full table stats.</p>}
       <div className="league-labels">
         <span>Pos</span>
         {TABLE_COLUMNS.map(([, label]) => <span key={label}>{label}</span>)}
       </div>
       <div className="league-values">
-        <strong>{displayValue(snapshot.position)}.</strong>
+        <strong>{displayValue(snapshot.position)}</strong>
         {TABLE_COLUMNS.map(([key, label]) => (
           <span key={label}>{displayValue(snapshot[key])}</span>
         ))}
@@ -312,7 +307,7 @@ function LeagueLine({ snapshot }) {
 }
 
 function FormStrip({ label, value }) {
-  const results = String(value || '').replace(/[^WDL]/g, '').split('').slice(-6)
+  const results = String(value || '').replace(/[^WDL]/g, '').split('').slice(-5)
 
   return (
     <div className="form-strip-wrap">
@@ -326,7 +321,7 @@ function FormStrip({ label, value }) {
           ))}
         </div>
       ) : (
-        <span className="form-empty">No form yet</span>
+        <span className="form-empty">-</span>
       )}
     </div>
   )
