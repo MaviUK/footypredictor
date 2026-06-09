@@ -1,6 +1,7 @@
 import { getSupabase, getUser, londonDate, shuffle, makeOptions, scorePoints, json } from './_gameHelpers.js'
 
 const DEFAULT_LEAGUE = { country: 'England', competition: 'E0', leagueName: 'Premier League' }
+const MAX_DAILY_ROUNDS = 46
 
 function cleanText(value, fallback) {
   const text = String(value || fallback).trim().slice(0, 80)
@@ -27,6 +28,10 @@ function tierName(level) {
 
 function tierSize(level) {
   return level === 1 ? 20 : 24
+}
+
+function tierSeasonLength(level) {
+  return tierSize(level) * 2 - 2
 }
 
 function zeroScore() {
@@ -159,13 +164,13 @@ async function ensureProfile(supabase, user) {
 
 async function ensureDailyGameFixtures(supabase, dailyGame) {
   const existing = await checked('daily game fixtures count', supabase.from('daily_game_fixtures').select('id').eq('daily_game_id', dailyGame.id))
-  if ((existing.data || []).length >= 38) return
+  if ((existing.data || []).length >= MAX_DAILY_ROUNDS) return
   if ((existing.data || []).length > 0) {
     await checked('daily game fixtures reset', supabase.from('daily_game_fixtures').delete().eq('daily_game_id', dailyGame.id))
   }
   const fixtures = await checked('fixtures lookup', supabase.from('fixtures').select('*').eq('season_id', dailyGame.season_id))
-  if ((fixtures.data || []).length < 38) throw new Error('Selected season does not have enough imported fixtures yet')
-  const rows = shuffle(fixtures.data, dailyGame.seed).slice(0, 38).map((fixture, index) => ({
+  if ((fixtures.data || []).length < MAX_DAILY_ROUNDS) throw new Error('Selected season does not have enough imported fixtures yet')
+  const rows = shuffle(fixtures.data, dailyGame.seed).slice(0, MAX_DAILY_ROUNDS).map((fixture, index) => ({
     daily_game_id: dailyGame.id,
     fixture_id: fixture.id,
     round_number: index + 1,
@@ -204,13 +209,13 @@ async function ensureDailyGame(supabase, gameDate, league) {
   return created.data
 }
 
-async function simulateBotPredictions({ supabase, roster, rounds, dailyGame, existingPredictions }) {
+async function simulateBotPredictions({ supabase, roster, rounds, dailyGame, seasonLength, existingPredictions }) {
   const existing = new Set((existingPredictions || []).map((row) => `${row.user_id}:${row.daily_game_fixture_id}`))
   const rows = []
 
   for (const profile of roster) {
     if (!isBotProfile(profile)) continue
-    const order = shuffle(rounds, `${dailyGame.seed}:user:${profile.user_id}`)
+    const order = shuffle(rounds, `${dailyGame.seed}:user:${profile.user_id}`).slice(0, seasonLength)
     for (const round of order) {
       const key = `${profile.user_id}:${round.id}`
       if (existing.has(key)) continue
@@ -240,6 +245,7 @@ export async function handler(event) {
     const supabase = getSupabase()
     const user = await getUser(event, supabase)
     const { profile, league } = await ensureProfile(supabase, user)
+    const seasonLength = tierSeasonLength(profile.pyramid_level)
     const gameDate = londonDate()
     const dailyGame = await ensureDailyGame(supabase, gameDate, league)
     const rounds = await checked('rounds lookup', supabase
@@ -249,8 +255,8 @@ export async function handler(event) {
       .order('round_number'))
     if (!rounds.data?.length) throw new Error('Today\'s game has no fixtures')
 
-    const roundIds = rounds.data.map((round) => round.id)
-    const userRounds = shuffle(rounds.data, `${dailyGame.seed}:user:${user.id}`).map((round, index) => ({ ...round, userRoundNumber: index + 1 }))
+    const userRounds = shuffle(rounds.data, `${dailyGame.seed}:user:${user.id}`).slice(0, seasonLength).map((round, index) => ({ ...round, userRoundNumber: index + 1 }))
+    const roundIds = userRounds.map((round) => round.id)
     const userPredictions = await checked('user predictions lookup', supabase
       .from('predictions')
       .select('*')
@@ -259,7 +265,7 @@ export async function handler(event) {
       .in('daily_game_fixture_id', roundIds))
     const predictionsByRound = new Map(userPredictions.data.map((prediction) => [prediction.daily_game_fixture_id, prediction]))
     const nextRound = userRounds.find((round) => !predictionsByRound.has(round.id))
-    const completed = userRounds.length >= 38 && predictionsByRound.size >= userRounds.length
+    const completed = predictionsByRound.size >= userRounds.length
     const currentUserPlayed = userPredictions.data.length
     const score = userPredictions.data.reduce((acc, prediction) => ({
       totalPoints: acc.totalPoints + prediction.points,
@@ -291,6 +297,7 @@ export async function handler(event) {
       roster: roster.data,
       rounds: rounds.data,
       dailyGame,
+      seasonLength,
       existingPredictions: tierPredictions.data || [],
     })
 
