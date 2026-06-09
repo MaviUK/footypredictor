@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabaseClient'
-import './App.css'
+import './dailyGame.css'
 
 const RESULT_LABELS = {
   H: 'Home win',
