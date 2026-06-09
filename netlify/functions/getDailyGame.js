@@ -255,6 +255,7 @@ export async function handler(event) {
       correctResults: acc.correctResults + (prediction.correct_result ? 1 : 0),
     }), zeroScore())
 
+    const currentUserPlayed = predictionsResult.data.length
     const resultHistory = userRounds
       .map((round) => {
         const prediction = predictionsByRound.get(round.id)
@@ -268,7 +269,8 @@ export async function handler(event) {
 
     const leaderboardResult = await supabase
       .from('predictions')
-      .select('user_id, points, exact_score, correct_result')
+      .select('user_id, daily_game_fixture_id, points, exact_score, correct_result')
+      .eq('is_auto', false)
       .in('daily_game_fixture_id', roundIds)
 
     if (leaderboardResult.error) throw leaderboardResult.error
@@ -284,12 +286,20 @@ export async function handler(event) {
     if (profilesResult.error) throw profilesResult.error
 
     const emailByUserId = new Map(profilesResult.data.map((profile) => [profile.user_id, profile.email]))
-    const leaderboardMap = new Map()
+    const predictionsByUser = new Map()
 
     for (const row of leaderboardResult.data) {
-      const current = leaderboardMap.get(row.user_id) || {
-        userId: row.user_id,
-        email: emailByUserId.get(row.user_id),
+      if (!predictionsByUser.has(row.user_id)) predictionsByUser.set(row.user_id, new Map())
+      predictionsByUser.get(row.user_id).set(row.daily_game_fixture_id, row)
+    }
+
+    const leaderboard = leaderboardUserIds.map((userId) => {
+      const userOrder = shuffle(roundsResult.data, `${dailyGame.seed}:user:${userId}`)
+      const comparableRounds = userOrder.slice(0, currentUserPlayed)
+      const userPredictions = predictionsByUser.get(userId) || new Map()
+      const row = {
+        userId,
+        email: emailByUserId.get(userId),
         played: 0,
         wins: 0,
         draws: 0,
@@ -297,20 +307,24 @@ export async function handler(event) {
         totalPoints: 0,
       }
 
-      current.played += 1
-      current.totalPoints += row.points
-      if (row.exact_score) {
-        current.wins += 1
-      } else if (row.correct_result) {
-        current.draws += 1
-      } else {
-        current.losses += 1
+      for (const round of comparableRounds) {
+        const prediction = userPredictions.get(round.id)
+        if (!prediction) continue
+
+        row.played += 1
+        row.totalPoints += prediction.points
+        if (prediction.exact_score) {
+          row.wins += 1
+        } else if (prediction.correct_result) {
+          row.draws += 1
+        } else {
+          row.losses += 1
+        }
       }
 
-      leaderboardMap.set(row.user_id, current)
-    }
-
-    const leaderboard = [...leaderboardMap.values()]
+      return row
+    })
+      .filter((row) => row.played > 0 || row.userId === user.id)
       .sort((a, b) =>
         b.totalPoints - a.totalPoints ||
         b.wins - a.wins ||
@@ -346,6 +360,7 @@ export async function handler(event) {
         displayName: dailyGame.seasons.display_name,
       },
       totalRounds: userRounds.length,
+      leaderboardRoundLimit: currentUserPlayed,
       completed,
       userScore: score,
       resultHistory,
