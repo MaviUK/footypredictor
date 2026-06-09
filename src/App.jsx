@@ -8,6 +8,24 @@ const RESULT_GROUPS = [
   ['A', 'Away win'],
 ]
 
+const COUNTRY_OPTIONS = [
+  'Northern Ireland',
+  'England',
+  'Scotland',
+  'Wales',
+  'Republic of Ireland',
+  'France',
+  'Germany',
+  'Spain',
+  'Italy',
+  'Netherlands',
+  'Portugal',
+  'United States',
+  'Canada',
+  'Australia',
+  'Other',
+]
+
 const TABLE_COLUMNS = [
   ['played', 'P'],
   ['won', 'W'],
@@ -28,7 +46,7 @@ function App() {
   const [lastResult, setLastResult] = useState(null)
   const [error, setError] = useState('')
   const [authMode, setAuthMode] = useState('sign-in')
-  const [authForm, setAuthForm] = useState({ email: '', username: '', password: '' })
+  const [authForm, setAuthForm] = useState({ email: '', username: '', country: 'Northern Ireland', password: '' })
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -123,9 +141,14 @@ function App() {
 
     try {
       const username = cleanUsername(authForm.username)
+      const country = authForm.country || 'Northern Ireland'
 
       if (authMode === 'sign-up' && username.length < 3) {
         throw new Error('Username must be at least 3 characters')
+      }
+
+      if (authMode === 'sign-up' && !country) {
+        throw new Error('Please choose your country')
       }
 
       const authAction = authMode === 'sign-up'
@@ -133,7 +156,7 @@ function App() {
           email: authForm.email,
           password: authForm.password,
           options: {
-            data: { username },
+            data: { username, country },
           },
         })
         : supabase.auth.signInWithPassword({
@@ -171,7 +194,7 @@ function App() {
           <div>
             <p className="eyebrow">Sign in</p>
             <h2>{authMode === 'sign-up' ? 'Create your account' : 'Welcome back'}</h2>
-            <p>Scores, daily winners, promotions and relegations are tracked against your account.</p>
+            <p>Pick your country league when signing up. Your daily table is only against players from that country.</p>
           </div>
 
           <form onSubmit={handleAuth}>
@@ -186,19 +209,34 @@ function App() {
             </label>
 
             {authMode === 'sign-up' && (
-              <label>
-                Username
-                <input
-                  type="text"
-                  minLength="3"
-                  maxLength="20"
-                  pattern="[A-Za-z0-9_]+"
-                  value={authForm.username}
-                  onChange={(event) => setAuthForm({ ...authForm, username: cleanUsername(event.target.value) })}
-                  placeholder="e.g. gavin_fc"
-                  required
-                />
-              </label>
+              <>
+                <label>
+                  Username
+                  <input
+                    type="text"
+                    minLength="3"
+                    maxLength="20"
+                    pattern="[A-Za-z0-9_]+"
+                    value={authForm.username}
+                    onChange={(event) => setAuthForm({ ...authForm, username: cleanUsername(event.target.value) })}
+                    placeholder="e.g. gavin_fc"
+                    required
+                  />
+                </label>
+
+                <label>
+                  Country league
+                  <select
+                    value={authForm.country}
+                    onChange={(event) => setAuthForm({ ...authForm, country: event.target.value })}
+                    required
+                  >
+                    {COUNTRY_OPTIONS.map((country) => (
+                      <option value={country} key={country}>{country}</option>
+                    ))}
+                  </select>
+                </label>
+              </>
             )}
 
             <label>
@@ -233,6 +271,8 @@ function App() {
             <span>{session.user.user_metadata?.username || session.user.email}</span>
             <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
           </nav>
+
+          {game?.country && <p className="country-badge">Country league: {game.country}</p>}
 
           {game?.resultHistory?.length > 0 && <UserResultStrip results={game.resultHistory} />}
 
@@ -284,17 +324,17 @@ function App() {
             </section>
           )}
 
-          {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} />}
+          {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} country={game?.country} />}
         </>
       )}
     </main>
   )
 }
 
-function DailyLeaderboard({ rows }) {
+function DailyLeaderboard({ rows, country }) {
   return (
     <section className="panel daily-table-panel">
-      <p className="eyebrow">Today&apos;s table</p>
+      <p className="eyebrow">Today&apos;s table{country ? ` · ${country}` : ''}</p>
       <div className="daily-table">
         <div className="daily-table-row daily-table-head">
           <span>#</span>
