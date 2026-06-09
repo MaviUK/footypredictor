@@ -252,23 +252,40 @@ function App() {
             </section>
           )}
 
-          {leaderboard.length > 0 && (
-            <section className="panel">
-              <p className="eyebrow">Today&apos;s table</p>
-              <div className="leaderboard">
-                {leaderboard.map((row, index) => (
-                  <div key={row.userId}>
-                    <span>{index + 1}</span>
-                    <strong>{row.email || 'Player'}</strong>
-                    <span>{row.totalPoints} pts</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+          {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} />}
         </>
       )}
     </main>
+  )
+}
+
+function DailyLeaderboard({ rows }) {
+  return (
+    <section className="panel daily-table-panel">
+      <p className="eyebrow">Today&apos;s table</p>
+      <div className="daily-table">
+        <div className="daily-table-row daily-table-head">
+          <span>#</span>
+          <span>User</span>
+          <span>P</span>
+          <span>W</span>
+          <span>D</span>
+          <span>L</span>
+          <span>PTS</span>
+        </div>
+        {rows.map((row, index) => (
+          <div className="daily-table-row" key={row.userId}>
+            <span>{index + 1}</span>
+            <strong>{row.email || 'Player'}</strong>
+            <span>{displayValue(row.played)}</span>
+            <span>{displayValue(row.wins)}</span>
+            <span>{displayValue(row.draws)}</span>
+            <span>{displayValue(row.losses)}</span>
+            <span>{displayValue(row.totalPoints)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
