@@ -51,6 +51,92 @@ function targetUserIdFromEvent(event, fallbackUserId) {
   return event.queryStringParameters?.userId || fallbackUserId
 }
 
+function emptyTableRow(profile) {
+  return {
+    userId: profile.user_id,
+    tierSlot: profile.tier_slot || 9999,
+    displayName: profile.club_name || profile.username || profile.email || 'Club',
+    played: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    points: 0,
+  }
+}
+
+function compareRows(a, b) {
+  return b.points - a.points || b.wins - a.wins || b.draws - a.draws || a.losses - b.losses || a.tierSlot - b.tierSlot || a.displayName.localeCompare(b.displayName)
+}
+
+async function addFinishingPositions(supabase, profile, targetUserId, seasonRows) {
+  if (!seasonRows.length) return seasonRows
+
+  const rosterResult = await supabase
+    .from('user_profiles')
+    .select('user_id, email, username, club_name, country, competition, pyramid_level, tier_slot')
+    .eq('country', profile.country)
+    .eq('competition', profile.competition)
+    .eq('pyramid_level', profile.pyramid_level || 1)
+    .not('tier_slot', 'is', null)
+
+  if (rosterResult.error) throw rosterResult.error
+
+  const roster = rosterResult.data || []
+  const rosterIds = roster.map((row) => row.user_id)
+  if (!rosterIds.includes(targetUserId)) rosterIds.push(targetUserId)
+
+  for (const season of seasonRows) {
+    if (!season.id || season.id === 'unknown') {
+      season.finishingPosition = null
+      season.tableSize = roster.length || null
+      continue
+    }
+
+    const fixturesResult = await supabase
+      .from('daily_game_fixtures')
+      .select('id')
+      .eq('daily_game_id', season.id)
+
+    if (fixturesResult.error) throw fixturesResult.error
+
+    const fixtureIds = (fixturesResult.data || []).map((fixture) => fixture.id)
+    if (!fixtureIds.length) {
+      season.finishingPosition = null
+      season.tableSize = roster.length || null
+      continue
+    }
+
+    const predictionsResult = await supabase
+      .from('predictions')
+      .select('user_id, points, exact_score, correct_result')
+      .in('daily_game_fixture_id', fixtureIds)
+      .in('user_id', rosterIds)
+
+    if (predictionsResult.error) throw predictionsResult.error
+
+    const table = new Map()
+    for (const row of roster) table.set(row.user_id, emptyTableRow(row))
+    if (!table.has(targetUserId)) table.set(targetUserId, emptyTableRow(profile))
+
+    for (const prediction of predictionsResult.data || []) {
+      const row = table.get(prediction.user_id)
+      if (!row) continue
+      row.played += 1
+      row.points += Number(prediction.points || 0)
+      if (prediction.exact_score) row.wins += 1
+      else if (prediction.correct_result) row.draws += 1
+      else row.losses += 1
+    }
+
+    const sorted = [...table.values()].sort(compareRows)
+    const index = sorted.findIndex((row) => row.userId === targetUserId)
+    season.finishingPosition = index >= 0 ? index + 1 : null
+    season.tableSize = sorted.length
+  }
+
+  return seasonRows
+}
+
 export async function handler(event) {
   try {
     const supabase = getSupabase()
@@ -98,6 +184,8 @@ export async function handler(event) {
           losses: 0,
           points: 0,
           results: [],
+          finishingPosition: null,
+          tableSize: null,
         })
       }
 
@@ -113,7 +201,7 @@ export async function handler(event) {
       allResults.push(code)
     }
 
-    const seasonRows = [...seasons.values()].map((season) => ({
+    let seasonRows = [...seasons.values()].map((season) => ({
       ...season,
       winPercentage: pct(season.wins, season.played),
       drawPercentage: pct(season.draws, season.played),
@@ -122,6 +210,8 @@ export async function handler(event) {
       longestDrawStreak: longestRun(season.results, 'D'),
       longestLosingStreak: longestRun(season.results, 'L'),
     })).sort((a, b) => String(b.gameDate || '').localeCompare(String(a.gameDate || '')))
+
+    seasonRows = await addFinishingPositions(supabase, profile, targetUserId, seasonRows)
 
     stats.seasonsPlayed = seasonRows.length
     stats.totalPlayed = predictions.length
