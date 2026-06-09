@@ -1,4 +1,4 @@
-import { getSupabase, getUser, londonDate, shuffle, makeOptions, json } from './_gameHelpers.js'
+import { getSupabase, getUser, londonDate, shuffle, makeOptions, scorePoints, json } from './_gameHelpers.js'
 
 const DEFAULT_LEAGUE = { country: 'England', competition: 'E0', leagueName: 'Premier League' }
 
@@ -37,6 +37,11 @@ function outcome(prediction) {
   if (prediction.exact_score) return { code: 'W', label: 'Spot on', points: 3 }
   if (prediction.correct_result) return { code: 'D', label: 'Result right', points: 1 }
   return { code: 'L', label: 'Wrong', points: 0 }
+}
+
+function isBotProfile(profile) {
+  const email = String(profile.email || '').toLowerCase()
+  return profile.is_bot === true || email.endsWith('.test') || email.includes('+bot')
 }
 
 function emptyTeam(name) {
@@ -198,6 +203,38 @@ async function ensureDailyGame(supabase, gameDate, league) {
   return created.data
 }
 
+async function simulateBotPredictions({ supabase, roster, rounds, dailyGame, currentUserPlayed, existingPredictions }) {
+  if (!currentUserPlayed) return
+  const existing = new Set((existingPredictions || []).map((row) => `${row.user_id}:${row.daily_game_fixture_id}`))
+  const rows = []
+
+  for (const profile of roster) {
+    if (!isBotProfile(profile)) continue
+    const order = shuffle(rounds, `${dailyGame.seed}:user:${profile.user_id}`).slice(0, currentUserPlayed)
+    for (const round of order) {
+      const key = `${profile.user_id}:${round.id}`
+      if (existing.has(key)) continue
+      const option = shuffle(round.options || [], `${dailyGame.seed}:bot:${profile.user_id}:${round.id}`)[0]
+      if (!option) continue
+      rows.push({
+        daily_game_fixture_id: round.id,
+        user_id: profile.user_id,
+        predicted_home_goals: Number(option.homeGoals),
+        predicted_away_goals: Number(option.awayGoals),
+        is_auto: true,
+        ...scorePoints(round.fixtures, Number(option.homeGoals), Number(option.awayGoals)),
+      })
+      existing.add(key)
+    }
+  }
+
+  for (let index = 0; index < rows.length; index += 500) {
+    await checked('bot predictions upsert', supabase
+      .from('predictions')
+      .upsert(rows.slice(index, index + 500), { onConflict: 'daily_game_fixture_id,user_id' }))
+  }
+}
+
 export async function handler(event) {
   try {
     const supabase = getSupabase()
@@ -213,8 +250,6 @@ export async function handler(event) {
     if (!rounds.data?.length) throw new Error('Today\'s game has no fixtures')
 
     const roundIds = rounds.data.map((round) => round.id)
-    await checked('auto prediction cleanup', supabase.from('predictions').delete().eq('is_auto', true).in('daily_game_fixture_id', roundIds))
-
     const userRounds = shuffle(rounds.data, `${dailyGame.seed}:user:${user.id}`).map((round, index) => ({ ...round, userRoundNumber: index + 1 }))
     const userPredictions = await checked('user predictions lookup', supabase
       .from('predictions')
@@ -243,13 +278,28 @@ export async function handler(event) {
       .eq('competition', league.competition)
       .eq('pyramid_level', profile.pyramid_level)
       .not('tier_slot', 'is', null)
+      .lte('tier_slot', tierSize(profile.pyramid_level))
       .order('tier_slot'))
     const rosterIds = new Set(roster.data.map((row) => row.user_id))
-    const tierPredictions = await checked('tier predictions lookup', supabase
+    let tierPredictions = await checked('tier predictions lookup', supabase
       .from('predictions')
       .select('user_id, daily_game_fixture_id, points, exact_score, correct_result')
-      .eq('is_auto', false)
       .in('daily_game_fixture_id', roundIds))
+
+    await simulateBotPredictions({
+      supabase,
+      roster: roster.data,
+      rounds: rounds.data,
+      dailyGame,
+      currentUserPlayed,
+      existingPredictions: tierPredictions.data || [],
+    })
+
+    tierPredictions = await checked('tier predictions refresh', supabase
+      .from('predictions')
+      .select('user_id, daily_game_fixture_id, points, exact_score, correct_result')
+      .in('daily_game_fixture_id', roundIds))
+
     const predictionsByUser = new Map()
     for (const prediction of tierPredictions.data || []) {
       if (!rosterIds.has(prediction.user_id)) continue
