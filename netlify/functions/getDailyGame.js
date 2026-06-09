@@ -1,10 +1,57 @@
 import { getSupabase, getUser, londonDate, shuffle, makeOptions, json } from './_gameHelpers.js'
 
 const DEFAULT_COUNTRY = 'England'
+const DEFAULT_COMPETITION = 'E0'
+const DEFAULT_LEAGUE_NAME = 'Premier League'
 
-function cleanCountry(value) {
-  const country = String(value || DEFAULT_COUNTRY).trim().slice(0, 80)
-  return country || DEFAULT_COUNTRY
+function cleanText(value, fallback) {
+  const text = String(value || fallback).trim().slice(0, 80)
+  return text || fallback
+}
+
+function tierName(level) {
+  if (level === 1) return 'Premier League'
+  if (level === 2) return 'Championship'
+  if (level === 3) return 'League 1'
+  if (level === 4) return 'League 2'
+  if (level === 5) return 'National League'
+  return `National League ${level - 4}`
+}
+
+function tierSize(level) {
+  return level === 1 ? 20 : 24
+}
+
+async function assignTierPlace(supabase, country, competition) {
+  const profilesResult = await supabase
+    .from('user_profiles')
+    .select('pyramid_level, tier_slot')
+    .eq('country', country)
+    .eq('competition', competition)
+    .not('tier_slot', 'is', null)
+
+  if (profilesResult.error) throw profilesResult.error
+
+  const occupied = new Map()
+  for (const profile of profilesResult.data || []) {
+    const level = Number(profile.pyramid_level || 1)
+    const slot = Number(profile.tier_slot || 0)
+    if (!slot) continue
+    if (!occupied.has(level)) occupied.set(level, new Set())
+    occupied.get(level).add(slot)
+  }
+
+  for (let level = 1; level < 1000; level += 1) {
+    const used = occupied.get(level) || new Set()
+    const size = tierSize(level)
+    for (let slot = 1; slot <= size; slot += 1) {
+      if (!used.has(slot)) {
+        return { pyramidLevel: level, tierName: tierName(level), tierSlot: slot }
+      }
+    }
+  }
+
+  throw new Error('Could not allocate user to a tier')
 }
 
 function emptyTeam(name) {
@@ -150,11 +197,13 @@ async function ensureDailyGameFixtures(supabase, dailyGame) {
   if (insertFixtures.error) throw insertFixtures.error
 }
 
-async function ensureDailyGame(supabase, gameDate) {
+async function ensureDailyGame(supabase, gameDate, league) {
   const existing = await supabase
     .from('daily_games')
     .select('*, seasons(*)')
     .eq('game_date', gameDate)
+    .eq('country', league.country)
+    .eq('competition', league.competition)
     .maybeSingle()
 
   if (existing.error) throw existing.error
@@ -166,17 +215,25 @@ async function ensureDailyGame(supabase, gameDate) {
   const seasonsResult = await supabase
     .from('seasons')
     .select('*')
-    .eq('competition', 'E0')
+    .eq('country', league.country)
+    .eq('competition', league.competition)
     .eq('is_complete', true)
     .order('code')
 
   if (seasonsResult.error) throw seasonsResult.error
-  if (!seasonsResult.data?.length) throw new Error('No complete Premier League seasons have been imported yet')
+  if (!seasonsResult.data?.length) throw new Error(`No complete seasons imported for ${league.country} - ${league.leagueName}`)
 
-  const season = shuffle(seasonsResult.data, `season:${gameDate}`)[0]
+  const season = shuffle(seasonsResult.data, `season:${gameDate}:${league.country}:${league.competition}`)[0]
   const created = await supabase
     .from('daily_games')
-    .insert({ game_date: gameDate, season_id: season.id, seed: `daily:${gameDate}:${season.code}` })
+    .insert({
+      game_date: gameDate,
+      country: league.country,
+      competition: league.competition,
+      league_name: league.leagueName,
+      season_id: season.id,
+      seed: `daily:${gameDate}:${league.country}:${league.competition}:${season.code}`,
+    })
     .select('*, seasons(*)')
     .single()
 
@@ -229,21 +286,52 @@ export async function handler(event) {
     const user = await getUser(event, supabase)
     const profileResult = await supabase
       .from('user_profiles')
-      .select('country')
+      .select('email, username, country, competition, league_name, pyramid_level, tier_name, tier_slot')
       .eq('user_id', user.id)
       .maybeSingle()
 
     if (profileResult.error) throw profileResult.error
 
-    const existingCountry = profileResult.data?.country
-    const userCountry = cleanCountry(existingCountry || user.user_metadata?.country)
-    const gameDate = londonDate()
+    const profile = profileResult.data || {}
+    const league = {
+      country: cleanText(profile.country || user.user_metadata?.country, DEFAULT_COUNTRY),
+      competition: cleanText(profile.competition || user.user_metadata?.competition, DEFAULT_COMPETITION),
+      leagueName: cleanText(profile.league_name || user.user_metadata?.leagueName || user.user_metadata?.league_name, DEFAULT_LEAGUE_NAME),
+    }
 
-    await supabase
+    const needsTier = !profile.pyramid_level || !profile.tier_slot || profile.country !== league.country || profile.competition !== league.competition
+    const assigned = needsTier
+      ? await assignTierPlace(supabase, league.country, league.competition)
+      : {
+        pyramidLevel: profile.pyramid_level,
+        tierName: profile.tier_name || tierName(profile.pyramid_level),
+        tierSlot: profile.tier_slot,
+      }
+
+    const username = String(user.user_metadata?.username || profile.username || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20)
+    const profileUpdate = {
+      user_id: user.id,
+      email: user.email || profile.email,
+      country: league.country,
+      competition: league.competition,
+      league_name: league.leagueName,
+      pyramid_level: assigned.pyramidLevel,
+      tier_name: assigned.tierName,
+      tier_slot: assigned.tierSlot,
+      ...(username ? { username } : {}),
+    }
+
+    const savedProfileResult = await supabase
       .from('user_profiles')
-      .upsert({ user_id: user.id, email: user.email, country: userCountry }, { onConflict: 'user_id' })
+      .upsert(profileUpdate, { onConflict: 'user_id' })
+      .select('*')
+      .single()
 
-    let dailyGame = await ensureDailyGame(supabase, gameDate)
+    if (savedProfileResult.error) throw savedProfileResult.error
+
+    const savedProfile = savedProfileResult.data
+    const gameDate = londonDate()
+    let dailyGame = await ensureDailyGame(supabase, gameDate, league)
 
     const roundsResult = await supabase
       .from('daily_game_fixtures')
@@ -289,46 +377,49 @@ export async function handler(event) {
       })
       .filter(Boolean)
 
-    const leaderboardResult = await supabase
-      .from('predictions')
-      .select('user_id, daily_game_fixture_id, points, exact_score, correct_result')
-      .eq('is_auto', false)
-      .in('daily_game_fixture_id', roundIds)
+    const rosterResult = await supabase
+      .from('user_profiles')
+      .select('user_id, email, username, country, competition, league_name, pyramid_level, tier_name, tier_slot')
+      .eq('country', league.country)
+      .eq('competition', league.competition)
+      .eq('pyramid_level', savedProfile.pyramid_level)
+      .order('tier_slot')
+
+    if (rosterResult.error) throw rosterResult.error
+
+    const rosterIds = rosterResult.data.map((row) => row.user_id)
+    const leaderboardResult = rosterIds.length
+      ? await supabase
+        .from('predictions')
+        .select('user_id, daily_game_fixture_id, points, exact_score, correct_result')
+        .eq('is_auto', false)
+        .in('daily_game_fixture_id', roundIds)
+        .in('user_id', rosterIds)
+      : { data: [], error: null }
 
     if (leaderboardResult.error) throw leaderboardResult.error
 
-    const leaderboardUserIds = [...new Set(leaderboardResult.data.map((row) => row.user_id))]
-    const profilesResult = leaderboardUserIds.length
-      ? await supabase
-        .from('user_profiles')
-        .select('user_id, email, username, country')
-        .eq('country', userCountry)
-        .in('user_id', leaderboardUserIds)
-      : { data: [], error: null }
-
-    if (profilesResult.error) throw profilesResult.error
-
-    const countryUserIds = new Set(profilesResult.data.map((profile) => profile.user_id))
-    const profileByUserId = new Map(profilesResult.data.map((profile) => [profile.user_id, profile]))
     const predictionsByUser = new Map()
-
     for (const row of leaderboardResult.data) {
-      if (!countryUserIds.has(row.user_id)) continue
       if (!predictionsByUser.has(row.user_id)) predictionsByUser.set(row.user_id, new Map())
       predictionsByUser.get(row.user_id).set(row.daily_game_fixture_id, row)
     }
 
-    const leaderboard = [...countryUserIds].map((userId) => {
-      const userOrder = shuffle(roundsResult.data, `${dailyGame.seed}:user:${userId}`)
+    const leaderboard = rosterResult.data.map((rowProfile) => {
+      const userOrder = shuffle(roundsResult.data, `${dailyGame.seed}:user:${rowProfile.user_id}`)
       const comparableRounds = userOrder.slice(0, currentUserPlayed)
-      const userPredictions = predictionsByUser.get(userId) || new Map()
-      const profile = profileByUserId.get(userId) || {}
+      const userPredictions = predictionsByUser.get(rowProfile.user_id) || new Map()
       const row = {
-        userId,
-        email: profile.email,
-        username: profile.username,
-        country: profile.country || userCountry,
-        displayName: profile.username || profile.email || 'Player',
+        userId: rowProfile.user_id,
+        email: rowProfile.email,
+        username: rowProfile.username,
+        country: rowProfile.country,
+        competition: rowProfile.competition,
+        leagueName: rowProfile.league_name,
+        pyramidLevel: rowProfile.pyramid_level,
+        tierName: rowProfile.tier_name || tierName(rowProfile.pyramid_level),
+        tierSlot: rowProfile.tier_slot,
+        displayName: rowProfile.username || rowProfile.email || 'Player',
         played: 0,
         wins: 0,
         draws: 0,
@@ -353,15 +444,14 @@ export async function handler(event) {
 
       return row
     })
-      .filter((row) => row.played > 0 || row.userId === user.id)
       .sort((a, b) =>
         b.totalPoints - a.totalPoints ||
         b.wins - a.wins ||
         b.draws - a.draws ||
         a.losses - b.losses ||
+        (a.tierSlot || 9999) - (b.tierSlot || 9999) ||
         a.displayName.localeCompare(b.displayName),
       )
-      .slice(0, 20)
 
     let currentRound = null
     if (!completed && nextRound) {
@@ -384,7 +474,15 @@ export async function handler(event) {
 
     return json(200, {
       gameDate,
-      country: userCountry,
+      country: league.country,
+      competition: league.competition,
+      leagueName: league.leagueName,
+      tier: {
+        level: savedProfile.pyramid_level,
+        name: savedProfile.tier_name || tierName(savedProfile.pyramid_level),
+        slot: savedProfile.tier_slot,
+        size: tierSize(savedProfile.pyramid_level),
+      },
       season: {
         code: dailyGame.seasons.code,
         displayName: dailyGame.seasons.display_name,
