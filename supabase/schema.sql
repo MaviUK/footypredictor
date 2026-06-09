@@ -52,9 +52,12 @@ create table if not exists public.daily_game_fixtures (
 create table if not exists public.user_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   email text,
+  username text,
   pyramid_level integer not null default 1,
   created_at timestamptz not null default now()
 );
+
+alter table public.user_profiles add column if not exists username text;
 
 create table if not exists public.predictions (
   id uuid primary key default gen_random_uuid(),
