@@ -21,7 +21,11 @@ function seasonCodes() {
 }
 
 function displayName(code) {
-  return `20${code.slice(0, 2)}/20${code.slice(2)}`.replace('2093/2094', '1993/1994')
+  const start = Number(code.slice(0, 2))
+  const end = Number(code.slice(2))
+  const startYear = start >= 90 ? 1900 + start : 2000 + start
+  const endYear = end >= 90 ? 1900 + end : 2000 + end
+  return `${startYear}/${endYear}`
 }
 
 function parseCsv(text) {
@@ -103,10 +107,15 @@ function snapshot(table, team, venue) {
   return {
     position: sorted.findIndex((item) => item.name === team) + 1 || null,
     played: row.played,
-    points: row.points,
+    won: row.won,
+    drawn: row.drawn,
+    lost: row.lost,
+    goalsFor: row.goalsFor,
+    goalsAgainst: row.goalsAgainst,
     goalDifference: row.goalsFor - row.goalsAgainst,
-    form: row.form.slice(-5).join(''),
-    venueForm: (venue === 'home' ? row.homeForm : row.awayForm).slice(-5).join(''),
+    points: row.points,
+    form: row.form.slice(-6).join(''),
+    venueForm: (venue === 'home' ? row.homeForm : row.awayForm).slice(-6).join(''),
   }
 }
 
@@ -191,11 +200,10 @@ async function importSeason(code) {
     return fixture
   })
 
-  const { error: deleteError } = await supabase.from('fixtures').delete().eq('season_id', season.id)
-  if (deleteError) throw deleteError
-
   for (let i = 0; i < fixtures.length; i += 500) {
-    const { error } = await supabase.from('fixtures').insert(fixtures.slice(i, i + 500))
+    const { error } = await supabase
+      .from('fixtures')
+      .upsert(fixtures.slice(i, i + 500), { onConflict: 'season_id,source_row' })
     if (error) throw error
   }
 
