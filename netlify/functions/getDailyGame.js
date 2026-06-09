@@ -290,14 +290,34 @@ export async function handler(event) {
       const current = leaderboardMap.get(row.user_id) || {
         userId: row.user_id,
         email: emailByUserId.get(row.user_id),
+        played: 0,
+        wins: 0,
+        draws: 0,
+        losses: 0,
         totalPoints: 0,
       }
+
+      current.played += 1
       current.totalPoints += row.points
+      if (row.exact_score) {
+        current.wins += 1
+      } else if (row.correct_result) {
+        current.draws += 1
+      } else {
+        current.losses += 1
+      }
+
       leaderboardMap.set(row.user_id, current)
     }
 
     const leaderboard = [...leaderboardMap.values()]
-      .sort((a, b) => b.totalPoints - a.totalPoints)
+      .sort((a, b) =>
+        b.totalPoints - a.totalPoints ||
+        b.wins - a.wins ||
+        b.draws - a.draws ||
+        a.losses - b.losses ||
+        a.email?.localeCompare(b.email || '') || 0,
+      )
       .slice(0, 20)
 
     let currentRound = null
