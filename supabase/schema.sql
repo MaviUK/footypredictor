@@ -53,11 +53,13 @@ create table if not exists public.user_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   email text,
   username text,
+  country text not null default 'Northern Ireland',
   pyramid_level integer not null default 1,
   created_at timestamptz not null default now()
 );
 
 alter table public.user_profiles add column if not exists username text;
+alter table public.user_profiles add column if not exists country text not null default 'Northern Ireland';
 
 create table if not exists public.predictions (
   id uuid primary key default gen_random_uuid(),
