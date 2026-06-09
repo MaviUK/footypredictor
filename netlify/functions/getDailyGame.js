@@ -279,13 +279,13 @@ export async function handler(event) {
     const profilesResult = leaderboardUserIds.length
       ? await supabase
         .from('user_profiles')
-        .select('user_id, email')
+        .select('user_id, email, username')
         .in('user_id', leaderboardUserIds)
       : { data: [], error: null }
 
     if (profilesResult.error) throw profilesResult.error
 
-    const emailByUserId = new Map(profilesResult.data.map((profile) => [profile.user_id, profile.email]))
+    const profileByUserId = new Map(profilesResult.data.map((profile) => [profile.user_id, profile]))
     const predictionsByUser = new Map()
 
     for (const row of leaderboardResult.data) {
@@ -297,9 +297,12 @@ export async function handler(event) {
       const userOrder = shuffle(roundsResult.data, `${dailyGame.seed}:user:${userId}`)
       const comparableRounds = userOrder.slice(0, currentUserPlayed)
       const userPredictions = predictionsByUser.get(userId) || new Map()
+      const profile = profileByUserId.get(userId) || {}
       const row = {
         userId,
-        email: emailByUserId.get(userId),
+        email: profile.email,
+        username: profile.username,
+        displayName: profile.username || profile.email || 'Player',
         played: 0,
         wins: 0,
         draws: 0,
@@ -330,7 +333,7 @@ export async function handler(event) {
         b.wins - a.wins ||
         b.draws - a.draws ||
         a.losses - b.losses ||
-        a.email?.localeCompare(b.email || '') || 0,
+        a.displayName.localeCompare(b.displayName),
       )
       .slice(0, 20)
 
