@@ -1,5 +1,32 @@
 import { getSupabase, getUser, scorePoints, json } from './_gameHelpers.js'
 
+function outcomeFor(points) {
+  if (points.exact_score) {
+    return {
+      code: 'W',
+      label: 'Spot on',
+      description: 'Exact score correct',
+      points: 3,
+    }
+  }
+
+  if (points.correct_result) {
+    return {
+      code: 'D',
+      label: 'Result right',
+      description: 'Correct outcome, wrong score',
+      points: 1,
+    }
+  }
+
+  return {
+    code: 'L',
+    label: 'Wrong',
+    description: 'Incorrect result',
+    points: 0,
+  }
+}
+
 export async function handler(event) {
   try {
     if (event.httpMethod !== 'POST') {
@@ -45,7 +72,14 @@ export async function handler(event) {
 
     if (insertResult.error) throw insertResult.error
 
-    return json(200, { prediction: insertResult.data })
+    return json(200, {
+      prediction: insertResult.data,
+      result: {
+        ...outcomeFor(points),
+        predictedScore: `${homeGoals}-${awayGoals}`,
+        actualScore: `${roundResult.data.fixtures.full_time_home_goals}-${roundResult.data.fixtures.full_time_away_goals}`,
+      },
+    })
   } catch (error) {
     return json(500, { error: error.message })
   }
