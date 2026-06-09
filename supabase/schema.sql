@@ -77,6 +77,8 @@ create table if not exists public.user_profiles (
   competition text not null default 'E0',
   league_name text not null default 'Premier League',
   pyramid_level integer not null default 1,
+  tier_name text not null default 'Premier League',
+  tier_slot integer,
   created_at timestamptz not null default now()
 );
 
@@ -84,6 +86,8 @@ alter table public.user_profiles add column if not exists username text;
 alter table public.user_profiles add column if not exists country text not null default 'England';
 alter table public.user_profiles add column if not exists competition text not null default 'E0';
 alter table public.user_profiles add column if not exists league_name text not null default 'Premier League';
+alter table public.user_profiles add column if not exists tier_name text not null default 'Premier League';
+alter table public.user_profiles add column if not exists tier_slot integer;
 
 create table if not exists public.predictions (
   id uuid primary key default gen_random_uuid(),
