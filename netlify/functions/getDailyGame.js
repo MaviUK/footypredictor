@@ -1,5 +1,12 @@
 import { getSupabase, getUser, londonDate, shuffle, makeOptions, json } from './_gameHelpers.js'
 
+const DEFAULT_COUNTRY = 'Northern Ireland'
+
+function cleanCountry(value) {
+  const country = String(value || DEFAULT_COUNTRY).trim().slice(0, 80)
+  return country || DEFAULT_COUNTRY
+}
+
 function emptyTeam(name) {
   return {
     name,
@@ -220,7 +227,13 @@ export async function handler(event) {
   try {
     const supabase = getSupabase()
     const user = await getUser(event, supabase)
+    const userCountry = cleanCountry(user.user_metadata?.country)
     const gameDate = londonDate()
+
+    await supabase
+      .from('user_profiles')
+      .upsert({ user_id: user.id, email: user.email, country: userCountry }, { onConflict: 'user_id' })
+
     let dailyGame = await ensureDailyGame(supabase, gameDate)
 
     const roundsResult = await supabase
@@ -279,21 +292,24 @@ export async function handler(event) {
     const profilesResult = leaderboardUserIds.length
       ? await supabase
         .from('user_profiles')
-        .select('user_id, email, username')
+        .select('user_id, email, username, country')
+        .eq('country', userCountry)
         .in('user_id', leaderboardUserIds)
       : { data: [], error: null }
 
     if (profilesResult.error) throw profilesResult.error
 
+    const countryUserIds = new Set(profilesResult.data.map((profile) => profile.user_id))
     const profileByUserId = new Map(profilesResult.data.map((profile) => [profile.user_id, profile]))
     const predictionsByUser = new Map()
 
     for (const row of leaderboardResult.data) {
+      if (!countryUserIds.has(row.user_id)) continue
       if (!predictionsByUser.has(row.user_id)) predictionsByUser.set(row.user_id, new Map())
       predictionsByUser.get(row.user_id).set(row.daily_game_fixture_id, row)
     }
 
-    const leaderboard = leaderboardUserIds.map((userId) => {
+    const leaderboard = [...countryUserIds].map((userId) => {
       const userOrder = shuffle(roundsResult.data, `${dailyGame.seed}:user:${userId}`)
       const comparableRounds = userOrder.slice(0, currentUserPlayed)
       const userPredictions = predictionsByUser.get(userId) || new Map()
@@ -302,6 +318,7 @@ export async function handler(event) {
         userId,
         email: profile.email,
         username: profile.username,
+        country: profile.country || userCountry,
         displayName: profile.username || profile.email || 'Player',
         played: 0,
         wins: 0,
@@ -358,6 +375,7 @@ export async function handler(event) {
 
     return json(200, {
       gameDate,
+      country: userCountry,
       season: {
         code: dailyGame.seasons.code,
         displayName: dailyGame.seasons.display_name,
