@@ -6,11 +6,14 @@ create table if not exists public.seasons (
   display_name text not null,
   competition text not null default 'E0',
   country text not null default 'England',
+  league_name text not null default 'Premier League',
   is_complete boolean not null default false,
   source_url text not null,
   fixture_count integer not null default 0,
   imported_at timestamptz not null default now()
 );
+
+alter table public.seasons add column if not exists league_name text not null default 'Premier League';
 
 create table if not exists public.fixtures (
   id uuid primary key default gen_random_uuid(),
@@ -30,14 +33,31 @@ create table if not exists public.fixtures (
 
 create table if not exists public.daily_games (
   id uuid primary key default gen_random_uuid(),
-  game_date date not null unique,
+  game_date date not null,
+  country text not null default 'England',
+  competition text not null default 'E0',
+  league_name text not null default 'Premier League',
   season_id uuid not null references public.seasons(id),
   seed text not null,
   status text not null default 'open' check (status in ('open','closed')),
   winner_user_id uuid,
   created_at timestamptz not null default now(),
-  closed_at timestamptz
+  closed_at timestamptz,
+  unique (game_date, country, competition)
 );
+
+alter table public.daily_games drop constraint if exists daily_games_game_date_key;
+alter table public.daily_games add column if not exists country text not null default 'England';
+alter table public.daily_games add column if not exists competition text not null default 'E0';
+alter table public.daily_games add column if not exists league_name text not null default 'Premier League';
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'daily_games_game_date_country_competition_key'
+  ) then
+    alter table public.daily_games add constraint daily_games_game_date_country_competition_key unique (game_date, country, competition);
+  end if;
+end $$;
 
 create table if not exists public.daily_game_fixtures (
   id uuid primary key default gen_random_uuid(),
@@ -53,13 +73,17 @@ create table if not exists public.user_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   email text,
   username text,
-  country text not null default 'Northern Ireland',
+  country text not null default 'England',
+  competition text not null default 'E0',
+  league_name text not null default 'Premier League',
   pyramid_level integer not null default 1,
   created_at timestamptz not null default now()
 );
 
 alter table public.user_profiles add column if not exists username text;
-alter table public.user_profiles add column if not exists country text not null default 'Northern Ireland';
+alter table public.user_profiles add column if not exists country text not null default 'England';
+alter table public.user_profiles add column if not exists competition text not null default 'E0';
+alter table public.user_profiles add column if not exists league_name text not null default 'Premier League';
 
 create table if not exists public.predictions (
   id uuid primary key default gen_random_uuid(),
