@@ -1,6 +1,6 @@
 import { getSupabase, getUser, londonDate, shuffle, makeOptions, json } from './_gameHelpers.js'
 
-const DEFAULT_COUNTRY = 'Northern Ireland'
+const DEFAULT_COUNTRY = 'England'
 
 function cleanCountry(value) {
   const country = String(value || DEFAULT_COUNTRY).trim().slice(0, 80)
@@ -227,7 +227,16 @@ export async function handler(event) {
   try {
     const supabase = getSupabase()
     const user = await getUser(event, supabase)
-    const userCountry = cleanCountry(user.user_metadata?.country)
+    const profileResult = await supabase
+      .from('user_profiles')
+      .select('country')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (profileResult.error) throw profileResult.error
+
+    const existingCountry = profileResult.data?.country
+    const userCountry = cleanCountry(existingCountry || user.user_metadata?.country)
     const gameDate = londonDate()
 
     await supabase
