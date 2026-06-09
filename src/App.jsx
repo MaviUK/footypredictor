@@ -8,6 +8,17 @@ const RESULT_LABELS = {
   A: 'Away win',
 }
 
+const TABLE_COLUMNS = [
+  ['played', 'P'],
+  ['won', 'W'],
+  ['drawn', 'D'],
+  ['lost', 'L'],
+  ['goalsFor', 'GF'],
+  ['goalsAgainst', 'GA'],
+  ['goalDifference', 'GD'],
+  ['points', 'PTS'],
+]
+
 function App() {
   const [session, setSession] = useState(null)
   const [game, setGame] = useState(null)
@@ -189,16 +200,21 @@ function App() {
           {loading && <section className="panel">Loading today&apos;s game...</section>}
 
           {!loading && game?.currentRound && (
-            <section className="game-grid">
+            <section className="game-layout">
               <article className="panel fixture-panel">
                 <div className="round-meta">
                   <span>Round {game.currentRound.roundNumber} of {game.totalRounds}</span>
                   <strong>{game.season.displayName}</strong>
                 </div>
 
+                <div className="match-title">
+                  <h2>{game.currentRound.home.name}</h2>
+                  <span>v</span>
+                  <h2>{game.currentRound.away.name}</h2>
+                </div>
+
                 <div className="scoreboard">
                   <TeamBlock side="Home" team={game.currentRound.home} />
-                  <span className="versus">v</span>
                   <TeamBlock side="Away" team={game.currentRound.away} />
                 </div>
 
@@ -210,14 +226,14 @@ function App() {
                       onClick={() => submitPrediction(option)}
                       disabled={submitting}
                     >
-                      {option.homeGoals}-{option.awayGoals}
+                      <strong>{option.homeGoals}-{option.awayGoals}</strong>
                       <small>{RESULT_LABELS[option.result]}</small>
                     </button>
                   ))}
                 </div>
               </article>
 
-              <aside className="panel">
+              <aside className="panel score-panel">
                 <p className="eyebrow">Your score</p>
                 <h2>{game.userScore.totalPoints} pts</h2>
                 <p>
@@ -259,30 +275,71 @@ function App() {
 }
 
 function TeamBlock({ side, team }) {
+  const snapshot = team.snapshot || {}
+
   return (
-    <div className="team-card">
-      <span>{side}</span>
-      <h2>{team.name}</h2>
-      <dl>
-        <div>
-          <dt>Position</dt>
-          <dd>{team.snapshot.position || '-'}</dd>
-        </div>
-        <div>
-          <dt>Points</dt>
-          <dd>{team.snapshot.points || 0}</dd>
-        </div>
-        <div>
-          <dt>Form</dt>
-          <dd>{team.snapshot.form || 'No form'}</dd>
-        </div>
-        <div>
-          <dt>{side} form</dt>
-          <dd>{team.snapshot.venueForm || 'No form'}</dd>
-        </div>
-      </dl>
+    <section className="team-card">
+      <div className="team-heading">
+        <span>{side}</span>
+        <h3>{team.name}</h3>
+      </div>
+
+      <LeagueLine snapshot={snapshot} />
+
+      <div className="form-area">
+        <FormStrip label="Last 5" value={snapshot.form} />
+        <FormStrip label={`${side} form`} value={snapshot.venueForm} />
+      </div>
+    </section>
+  )
+}
+
+function LeagueLine({ snapshot }) {
+  return (
+    <div className="league-strip" aria-label="League table line before this fixture">
+      <div className="league-labels">
+        <span>Pos</span>
+        {TABLE_COLUMNS.map(([, label]) => <span key={label}>{label}</span>)}
+      </div>
+      <div className="league-values">
+        <strong>{displayValue(snapshot.position)}.</strong>
+        {TABLE_COLUMNS.map(([key, label]) => (
+          <span key={label}>{displayValue(snapshot[key])}</span>
+        ))}
+      </div>
     </div>
   )
+}
+
+function FormStrip({ label, value }) {
+  const results = String(value || '').replace(/[^WDL]/g, '').split('').slice(-6)
+
+  return (
+    <div className="form-strip-wrap">
+      <span className="form-label">{label}</span>
+      {results.length ? (
+        <div className="form-strip">
+          {results.map((result, index) => (
+            <span className={`form-chip ${resultClass(result)}`} key={`${result}-${index}`}>
+              {result}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <span className="form-empty">No form yet</span>
+      )}
+    </div>
+  )
+}
+
+function displayValue(value) {
+  return value === null || value === undefined || value === '' ? '-' : value
+}
+
+function resultClass(result) {
+  if (result === 'W') return 'win'
+  if (result === 'D') return 'draw'
+  return 'loss'
 }
 
 export default App
