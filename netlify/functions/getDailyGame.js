@@ -1,5 +1,102 @@
 import { getSupabase, getUser, londonDate, shuffle, makeOptions, json } from './_gameHelpers.js'
 
+function emptyTeam(name) {
+  return {
+    name,
+    played: 0,
+    won: 0,
+    drawn: 0,
+    lost: 0,
+    goalsFor: 0,
+    goalsAgainst: 0,
+    points: 0,
+    form: [],
+    homeForm: [],
+    awayForm: [],
+  }
+}
+
+function applyFixtureToTable(table, fixture) {
+  const home = table.get(fixture.home_team) || emptyTeam(fixture.home_team)
+  const away = table.get(fixture.away_team) || emptyTeam(fixture.away_team)
+  const homeGoals = Number(fixture.full_time_home_goals)
+  const awayGoals = Number(fixture.full_time_away_goals)
+  const homeResult = homeGoals > awayGoals ? 'W' : homeGoals === awayGoals ? 'D' : 'L'
+  const awayResult = awayGoals > homeGoals ? 'W' : homeGoals === awayGoals ? 'D' : 'L'
+
+  home.played += 1
+  away.played += 1
+  home.goalsFor += homeGoals
+  home.goalsAgainst += awayGoals
+  away.goalsFor += awayGoals
+  away.goalsAgainst += homeGoals
+  home.points += homeResult === 'W' ? 3 : homeResult === 'D' ? 1 : 0
+  away.points += awayResult === 'W' ? 3 : awayResult === 'D' ? 1 : 0
+  home.won += homeResult === 'W' ? 1 : 0
+  home.drawn += homeResult === 'D' ? 1 : 0
+  home.lost += homeResult === 'L' ? 1 : 0
+  away.won += awayResult === 'W' ? 1 : 0
+  away.drawn += awayResult === 'D' ? 1 : 0
+  away.lost += awayResult === 'L' ? 1 : 0
+  home.form.push(homeResult)
+  away.form.push(awayResult)
+  home.homeForm.push(homeResult)
+  away.awayForm.push(awayResult)
+  table.set(home.name, home)
+  table.set(away.name, away)
+}
+
+function tableSnapshot(table, teamName, venue, fallback = {}) {
+  const sorted = [...table.values()].sort((a, b) =>
+    b.points - a.points ||
+    (b.goalsFor - b.goalsAgainst) - (a.goalsFor - a.goalsAgainst) ||
+    b.goalsFor - a.goalsFor ||
+    a.name.localeCompare(b.name),
+  )
+  const row = table.get(teamName) || emptyTeam(teamName)
+  const position = sorted.findIndex((item) => item.name === teamName) + 1 || fallback.position || null
+
+  return {
+    ...fallback,
+    position,
+    played: row.played,
+    won: row.won,
+    drawn: row.drawn,
+    lost: row.lost,
+    goalsFor: row.goalsFor,
+    goalsAgainst: row.goalsAgainst,
+    goalDifference: row.goalsFor - row.goalsAgainst,
+    points: row.points,
+    form: row.form.slice(-5).join('') || fallback.form || '',
+    venueForm: (venue === 'home' ? row.homeForm : row.awayForm).slice(-5).join('') || fallback.venueForm || '',
+  }
+}
+
+async function buildLiveSnapshots(supabase, fixture) {
+  const seasonFixturesResult = await supabase
+    .from('fixtures')
+    .select('source_row, match_date, home_team, away_team, full_time_home_goals, full_time_away_goals')
+    .eq('season_id', fixture.season_id)
+    .order('match_date')
+    .order('source_row')
+
+  if (seasonFixturesResult.error) throw seasonFixturesResult.error
+
+  const table = new Map()
+  for (const pastFixture of seasonFixturesResult.data || []) {
+    const isBefore = pastFixture.match_date < fixture.match_date ||
+      (pastFixture.match_date === fixture.match_date && pastFixture.source_row < fixture.source_row)
+
+    if (!isBefore) continue
+    applyFixtureToTable(table, pastFixture)
+  }
+
+  return {
+    home: tableSnapshot(table, fixture.home_team, 'home', fixture.home_snapshot || {}),
+    away: tableSnapshot(table, fixture.away_team, 'away', fixture.away_snapshot || {}),
+  }
+}
+
 async function ensureDailyGameFixtures(supabase, dailyGame) {
   const existingRounds = await supabase
     .from('daily_game_fixtures')
@@ -184,6 +281,24 @@ export async function handler(event) {
       .sort((a, b) => b.totalPoints - a.totalPoints)
       .slice(0, 20)
 
+    let currentRound = null
+    if (!completed && nextRound) {
+      const liveSnapshots = await buildLiveSnapshots(supabase, nextRound.fixtures)
+      currentRound = {
+        dailyGameFixtureId: nextRound.id,
+        roundNumber: nextRound.round_number,
+        options: nextRound.options,
+        home: {
+          name: nextRound.fixtures.home_team,
+          snapshot: liveSnapshots.home,
+        },
+        away: {
+          name: nextRound.fixtures.away_team,
+          snapshot: liveSnapshots.away,
+        },
+      }
+    }
+
     return json(200, {
       gameDate,
       season: {
@@ -194,19 +309,7 @@ export async function handler(event) {
       completed,
       userScore: score,
       leaderboard,
-      currentRound: !completed && nextRound ? {
-        dailyGameFixtureId: nextRound.id,
-        roundNumber: nextRound.round_number,
-        options: nextRound.options,
-        home: {
-          name: nextRound.fixtures.home_team,
-          snapshot: nextRound.fixtures.home_snapshot,
-        },
-        away: {
-          name: nextRound.fixtures.away_team,
-          snapshot: nextRound.fixtures.away_snapshot,
-        },
-      } : null,
+      currentRound,
     })
   } catch (error) {
     return json(500, { error: error.message })
