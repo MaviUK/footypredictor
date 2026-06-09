@@ -28,7 +28,7 @@ function App() {
   const [lastResult, setLastResult] = useState(null)
   const [error, setError] = useState('')
   const [authMode, setAuthMode] = useState('sign-in')
-  const [authForm, setAuthForm] = useState({ email: '', password: '' })
+  const [authForm, setAuthForm] = useState({ email: '', username: '', password: '' })
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -122,9 +122,24 @@ function App() {
     setLoading(true)
 
     try {
+      const username = cleanUsername(authForm.username)
+
+      if (authMode === 'sign-up' && username.length < 3) {
+        throw new Error('Username must be at least 3 characters')
+      }
+
       const authAction = authMode === 'sign-up'
-        ? supabase.auth.signUp(authForm)
-        : supabase.auth.signInWithPassword(authForm)
+        ? supabase.auth.signUp({
+          email: authForm.email,
+          password: authForm.password,
+          options: {
+            data: { username },
+          },
+        })
+        : supabase.auth.signInWithPassword({
+          email: authForm.email,
+          password: authForm.password,
+        })
 
       const { error: authError } = await authAction
 
@@ -169,6 +184,23 @@ function App() {
                 required
               />
             </label>
+
+            {authMode === 'sign-up' && (
+              <label>
+                Username
+                <input
+                  type="text"
+                  minLength="3"
+                  maxLength="20"
+                  pattern="[A-Za-z0-9_]+"
+                  value={authForm.username}
+                  onChange={(event) => setAuthForm({ ...authForm, username: cleanUsername(event.target.value) })}
+                  placeholder="e.g. gavin_fc"
+                  required
+                />
+              </label>
+            )}
+
             <label>
               Password
               <input
@@ -198,7 +230,7 @@ function App() {
       {session && (
         <>
           <nav className="topbar compact-topbar">
-            <span>{session.user.email}</span>
+            <span>{session.user.user_metadata?.username || session.user.email}</span>
             <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
           </nav>
 
@@ -276,7 +308,7 @@ function DailyLeaderboard({ rows }) {
         {rows.map((row, index) => (
           <div className="daily-table-row" key={row.userId}>
             <span>{index + 1}</span>
-            <strong>{row.email || 'Player'}</strong>
+            <strong>{row.displayName || row.username || row.email || 'Player'}</strong>
             <span>{displayValue(row.played)}</span>
             <span>{displayValue(row.wins)}</span>
             <span>{displayValue(row.draws)}</span>
@@ -405,6 +437,14 @@ function FormStrip({ label, value }) {
       )}
     </div>
   )
+}
+
+function cleanUsername(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 20)
 }
 
 function displayValue(value) {
