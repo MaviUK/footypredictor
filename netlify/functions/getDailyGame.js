@@ -16,6 +16,12 @@ function emptyTeam(name) {
   }
 }
 
+function predictionOutcome(prediction) {
+  if (prediction.exact_score) return { code: 'W', label: 'Spot on', points: 3 }
+  if (prediction.correct_result) return { code: 'D', label: 'Result right', points: 1 }
+  return { code: 'L', label: 'Wrong', points: 0 }
+}
+
 function applyFixtureToTable(table, fixture) {
   const home = table.get(fixture.home_team) || emptyTeam(fixture.home_team)
   const away = table.get(fixture.away_team) || emptyTeam(fixture.away_team)
@@ -226,6 +232,8 @@ export async function handler(event) {
     if (roundsResult.error) throw roundsResult.error
     if (!roundsResult.data?.length) throw new Error('Today\'s game has no fixtures. Please refresh in a moment.')
 
+    const userRounds = shuffle(roundsResult.data, `${dailyGame.seed}:user:${user.id}`)
+      .map((round, index) => ({ ...round, userRoundNumber: index + 1 }))
     const roundIds = roundsResult.data.map((round) => round.id)
     dailyGame = await reopenTodaysGameIfAutoClosed(supabase, dailyGame, roundIds, gameDate)
 
@@ -239,13 +247,24 @@ export async function handler(event) {
     if (predictionsResult.error) throw predictionsResult.error
 
     const predictionsByRound = new Map(predictionsResult.data.map((prediction) => [prediction.daily_game_fixture_id, prediction]))
-    const nextRound = roundsResult.data.find((round) => !predictionsByRound.has(round.id))
-    const completed = dailyGame.status === 'closed' || (roundsResult.data.length >= 38 && predictionsByRound.size >= roundsResult.data.length)
+    const nextRound = userRounds.find((round) => !predictionsByRound.has(round.id))
+    const completed = dailyGame.status === 'closed' || (userRounds.length >= 38 && predictionsByRound.size >= userRounds.length)
     const score = predictionsResult.data.reduce((acc, prediction) => ({
       totalPoints: acc.totalPoints + prediction.points,
       correctScores: acc.correctScores + (prediction.exact_score ? 1 : 0),
       correctResults: acc.correctResults + (prediction.correct_result ? 1 : 0),
     }), zeroScore())
+
+    const resultHistory = userRounds
+      .map((round) => {
+        const prediction = predictionsByRound.get(round.id)
+        if (!prediction) return null
+        return {
+          roundNumber: round.userRoundNumber,
+          ...predictionOutcome(prediction),
+        }
+      })
+      .filter(Boolean)
 
     const leaderboardResult = await supabase
       .from('predictions')
@@ -286,7 +305,7 @@ export async function handler(event) {
       const liveSnapshots = await buildLiveSnapshots(supabase, nextRound.fixtures)
       currentRound = {
         dailyGameFixtureId: nextRound.id,
-        roundNumber: nextRound.round_number,
+        roundNumber: nextRound.userRoundNumber,
         fixtureDate: nextRound.fixtures.match_date,
         options: nextRound.options,
         home: {
@@ -306,9 +325,10 @@ export async function handler(event) {
         code: dailyGame.seasons.code,
         displayName: dailyGame.seasons.display_name,
       },
-      totalRounds: roundsResult.data.length,
+      totalRounds: userRounds.length,
       completed,
       userScore: score,
+      resultHistory,
       leaderboard,
       currentRound,
     })
