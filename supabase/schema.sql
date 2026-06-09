@@ -63,16 +63,22 @@ create table if not exists public.daily_game_fixtures (
   id uuid primary key default gen_random_uuid(),
   daily_game_id uuid not null references public.daily_games(id) on delete cascade,
   fixture_id uuid not null references public.fixtures(id) on delete cascade,
-  round_number integer not null check (round_number between 1 and 38),
+  round_number integer not null check (round_number between 1 and 46),
   options jsonb not null,
   unique (daily_game_id, fixture_id),
   unique (daily_game_id, round_number)
 );
 
+alter table public.daily_game_fixtures drop constraint if exists daily_game_fixtures_round_number_check;
+alter table public.daily_game_fixtures add constraint daily_game_fixtures_round_number_check check (round_number between 1 and 46);
+
 create table if not exists public.user_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   email text,
   username text,
+  club_name text,
+  badge_url text,
+  badge_path text,
   country text not null default 'England',
   competition text not null default 'E0',
   league_name text not null default 'Premier League',
@@ -83,6 +89,9 @@ create table if not exists public.user_profiles (
 );
 
 alter table public.user_profiles add column if not exists username text;
+alter table public.user_profiles add column if not exists club_name text;
+alter table public.user_profiles add column if not exists badge_url text;
+alter table public.user_profiles add column if not exists badge_path text;
 alter table public.user_profiles add column if not exists country text not null default 'England';
 alter table public.user_profiles add column if not exists competition text not null default 'E0';
 alter table public.user_profiles add column if not exists league_name text not null default 'Premier League';
