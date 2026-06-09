@@ -163,20 +163,57 @@ async function ensureProfile(supabase, user) {
 }
 
 async function ensureDailyGameFixtures(supabase, dailyGame) {
-  const existing = await checked('daily game fixtures count', supabase.from('daily_game_fixtures').select('id').eq('daily_game_id', dailyGame.id))
-  if ((existing.data || []).length >= MAX_DAILY_ROUNDS) return
-  if ((existing.data || []).length > 0) {
-    await checked('daily game fixtures reset', supabase.from('daily_game_fixtures').delete().eq('daily_game_id', dailyGame.id))
+  const existing = await checked('daily game fixtures count', supabase
+    .from('daily_game_fixtures')
+    .select('id, fixture_id, round_number')
+    .eq('daily_game_id', dailyGame.id)
+    .order('round_number'))
+
+  const existingRows = existing.data || []
+  if (existingRows.length >= MAX_DAILY_ROUNDS) return
+
+  const fixtures = await checked('fixtures lookup', supabase
+    .from('fixtures')
+    .select('*')
+    .eq('season_id', dailyGame.season_id))
+
+  if ((fixtures.data || []).length < MAX_DAILY_ROUNDS) {
+    throw new Error('Selected season does not have enough imported fixtures yet')
   }
-  const fixtures = await checked('fixtures lookup', supabase.from('fixtures').select('*').eq('season_id', dailyGame.season_id))
-  if ((fixtures.data || []).length < MAX_DAILY_ROUNDS) throw new Error('Selected season does not have enough imported fixtures yet')
-  const rows = shuffle(fixtures.data, dailyGame.seed).slice(0, MAX_DAILY_ROUNDS).map((fixture, index) => ({
-    daily_game_id: dailyGame.id,
-    fixture_id: fixture.id,
-    round_number: index + 1,
-    options: makeOptions(fixture, `${dailyGame.seed}:${fixture.id}`),
-  }))
-  await checked('daily game fixtures insert', supabase.from('daily_game_fixtures').insert(rows))
+
+  const usedFixtureIds = new Set(existingRows.map((row) => row.fixture_id))
+  const usedRoundNumbers = new Set(existingRows.map((row) => Number(row.round_number)))
+  const shuffledFixtures = shuffle(fixtures.data || [], dailyGame.seed)
+  const rows = []
+  let fixtureIndex = 0
+
+  for (let roundNumber = 1; roundNumber <= MAX_DAILY_ROUNDS; roundNumber += 1) {
+    if (usedRoundNumbers.has(roundNumber)) continue
+
+    let fixture = null
+    while (fixtureIndex < shuffledFixtures.length) {
+      const candidate = shuffledFixtures[fixtureIndex]
+      fixtureIndex += 1
+      if (!usedFixtureIds.has(candidate.id)) {
+        fixture = candidate
+        usedFixtureIds.add(candidate.id)
+        break
+      }
+    }
+
+    if (!fixture) break
+
+    rows.push({
+      daily_game_id: dailyGame.id,
+      fixture_id: fixture.id,
+      round_number: roundNumber,
+      options: makeOptions(fixture, `${dailyGame.seed}:${fixture.id}`),
+    })
+  }
+
+  if (rows.length) {
+    await checked('daily game fixtures append', supabase.from('daily_game_fixtures').insert(rows))
+  }
 }
 
 async function ensureDailyGame(supabase, gameDate, league) {
