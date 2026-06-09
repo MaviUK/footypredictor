@@ -76,6 +76,39 @@ async function ensureDailyGame(supabase, gameDate) {
   return created.data
 }
 
+async function reopenTodaysGameIfAutoClosed(supabase, dailyGame, roundIds, gameDate) {
+  if (dailyGame.game_date !== gameDate) return dailyGame
+
+  const autoDelete = await supabase
+    .from('predictions')
+    .delete()
+    .eq('is_auto', true)
+    .in('daily_game_fixture_id', roundIds)
+
+  if (autoDelete.error) throw autoDelete.error
+
+  if (dailyGame.status === 'closed') {
+    const resultsDelete = await supabase
+      .from('daily_results')
+      .delete()
+      .eq('daily_game_id', dailyGame.id)
+
+    if (resultsDelete.error) throw resultsDelete.error
+
+    const reopenResult = await supabase
+      .from('daily_games')
+      .update({ status: 'open', winner_user_id: null, closed_at: null })
+      .eq('id', dailyGame.id)
+      .select('*, seasons(*)')
+      .single()
+
+    if (reopenResult.error) throw reopenResult.error
+    return reopenResult.data
+  }
+
+  return dailyGame
+}
+
 function zeroScore() {
   return { totalPoints: 0, correctScores: 0, correctResults: 0 }
 }
@@ -85,7 +118,7 @@ export async function handler(event) {
     const supabase = getSupabase()
     const user = await getUser(event, supabase)
     const gameDate = londonDate()
-    const dailyGame = await ensureDailyGame(supabase, gameDate)
+    let dailyGame = await ensureDailyGame(supabase, gameDate)
 
     const roundsResult = await supabase
       .from('daily_game_fixtures')
@@ -97,18 +130,20 @@ export async function handler(event) {
     if (!roundsResult.data?.length) throw new Error('Today\'s game has no fixtures. Please refresh in a moment.')
 
     const roundIds = roundsResult.data.map((round) => round.id)
+    dailyGame = await reopenTodaysGameIfAutoClosed(supabase, dailyGame, roundIds, gameDate)
 
     const predictionsResult = await supabase
       .from('predictions')
       .select('*')
       .eq('user_id', user.id)
+      .eq('is_auto', false)
       .in('daily_game_fixture_id', roundIds)
 
     if (predictionsResult.error) throw predictionsResult.error
 
     const predictionsByRound = new Map(predictionsResult.data.map((prediction) => [prediction.daily_game_fixture_id, prediction]))
     const nextRound = roundsResult.data.find((round) => !predictionsByRound.has(round.id))
-    const completed = roundsResult.data.length >= 38 && predictionsByRound.size >= roundsResult.data.length
+    const completed = dailyGame.status === 'closed' || (roundsResult.data.length >= 38 && predictionsByRound.size >= roundsResult.data.length)
     const score = predictionsResult.data.reduce((acc, prediction) => ({
       totalPoints: acc.totalPoints + prediction.points,
       correctScores: acc.correctScores + (prediction.exact_score ? 1 : 0),
