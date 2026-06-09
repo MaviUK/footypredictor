@@ -22,12 +22,21 @@ export async function handler(event) {
     const expectedSecret = process.env.CLOSE_DAILY_GAME_SECRET
     const providedSecret = event.headers['x-close-secret'] || event.queryStringParameters?.secret
 
-    if (expectedSecret && providedSecret !== expectedSecret) {
+    if (!expectedSecret) {
+      return json(500, { error: 'Missing CLOSE_DAILY_GAME_SECRET. Add this in Netlify before enabling closeout.' })
+    }
+
+    if (providedSecret !== expectedSecret) {
       return json(401, { error: 'Unauthorized' })
     }
 
     const supabase = getSupabase()
-    const gameDate = event.queryStringParameters?.date || previousLondonDate() || londonDate()
+    const today = londonDate()
+    const gameDate = event.queryStringParameters?.date || previousLondonDate()
+
+    if (gameDate >= today && event.queryStringParameters?.allowToday !== 'true') {
+      return json(409, { error: 'Refusing to close today before the day has ended.' })
+    }
 
     const dailyGameResult = await supabase
       .from('daily_games')
@@ -45,6 +54,7 @@ export async function handler(event) {
       .eq('daily_game_id', dailyGameResult.data.id)
 
     if (roundsResult.error) throw roundsResult.error
+    if ((roundsResult.data || []).length < 38) return json(409, { error: 'This game does not have 38 fixtures yet.' })
 
     const profilesResult = await supabase.from('user_profiles').select('*')
     if (profilesResult.error) throw profilesResult.error
