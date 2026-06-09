@@ -287,6 +287,7 @@ export async function handler(event) {
       currentRound = {
         dailyGameFixtureId: nextRound.id,
         roundNumber: nextRound.round_number,
+        fixtureDate: nextRound.fixtures.match_date,
         options: nextRound.options,
         home: {
           name: nextRound.fixtures.home_team,
