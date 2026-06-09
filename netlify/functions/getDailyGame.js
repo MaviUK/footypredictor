@@ -41,7 +41,13 @@ function outcome(prediction) {
 
 function isBotProfile(profile) {
   const email = String(profile.email || '').toLowerCase()
-  return profile.is_bot === true || email.endsWith('.test') || email.includes('+bot')
+  const username = String(profile.username || '').toLowerCase()
+  return (
+    profile.is_bot === true ||
+    email.endsWith('.test') ||
+    email.includes('+bot') ||
+    /_[0-9]{4}$/.test(username)
+  )
 }
 
 function emptyTeam(name) {
