@@ -42,12 +42,7 @@ function outcome(prediction) {
 function isBotProfile(profile) {
   const email = String(profile.email || '').toLowerCase()
   const username = String(profile.username || '').toLowerCase()
-  return (
-    profile.is_bot === true ||
-    email.endsWith('.test') ||
-    email.includes('+bot') ||
-    /_[0-9]{4}$/.test(username)
-  )
+  return profile.is_bot === true || email.endsWith('.test') || email.includes('+bot') || /_[0-9]{4}$/.test(username)
 }
 
 function emptyTeam(name) {
@@ -209,14 +204,13 @@ async function ensureDailyGame(supabase, gameDate, league) {
   return created.data
 }
 
-async function simulateBotPredictions({ supabase, roster, rounds, dailyGame, currentUserPlayed, existingPredictions }) {
-  if (!currentUserPlayed) return
+async function simulateBotPredictions({ supabase, roster, rounds, dailyGame, existingPredictions }) {
   const existing = new Set((existingPredictions || []).map((row) => `${row.user_id}:${row.daily_game_fixture_id}`))
   const rows = []
 
   for (const profile of roster) {
     if (!isBotProfile(profile)) continue
-    const order = shuffle(rounds, `${dailyGame.seed}:user:${profile.user_id}`).slice(0, currentUserPlayed)
+    const order = shuffle(rounds, `${dailyGame.seed}:user:${profile.user_id}`)
     for (const round of order) {
       const key = `${profile.user_id}:${round.id}`
       if (existing.has(key)) continue
@@ -297,7 +291,6 @@ export async function handler(event) {
       roster: roster.data,
       rounds: rounds.data,
       dailyGame,
-      currentUserPlayed,
       existingPredictions: tierPredictions.data || [],
     })
 
