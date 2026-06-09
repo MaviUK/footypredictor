@@ -25,6 +25,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [selectedOptionKey, setSelectedOptionKey] = useState('')
+  const [lastResult, setLastResult] = useState(null)
   const [error, setError] = useState('')
   const [authMode, setAuthMode] = useState('sign-in')
   const [authForm, setAuthForm] = useState({ email: '', password: '' })
@@ -83,6 +84,7 @@ function App() {
     setSelectedOptionKey(optionKey)
     setSubmitting(true)
     setError('')
+    setLastResult(null)
 
     try {
       const res = await fetch('/.netlify/functions/submitPrediction', {
@@ -104,6 +106,7 @@ function App() {
         throw new Error(data.error || 'Could not submit prediction')
       }
 
+      setLastResult(data.result)
       setSelectedOptionKey('')
       await loadGame()
     } catch (err) {
@@ -146,6 +149,7 @@ function App() {
       </section>
 
       {error && <p className="alert">{error}</p>}
+      {lastResult && <ResultNotice result={lastResult} />}
 
       {!session && (
         <section className="panel auth-panel">
@@ -198,6 +202,8 @@ function App() {
             <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
           </nav>
 
+          {game?.resultHistory?.length > 0 && <UserResultStrip results={game.resultHistory} />}
+
           {loading && <section className="panel">Loading today&apos;s game...</section>}
 
           {!loading && game?.currentRound && (
@@ -233,6 +239,7 @@ function App() {
                 <p className="eyebrow">Your score</p>
                 <h2>{game.userScore.totalPoints} pts</h2>
                 <p>{game.userScore.correctScores} exact · {game.userScore.correctResults} results</p>
+                <p className="muted">W = 3pts · D = 1pt · L = 0pts</p>
               </aside>
             </section>
           )}
@@ -262,6 +269,34 @@ function App() {
         </>
       )}
     </main>
+  )
+}
+
+function ResultNotice({ result }) {
+  return (
+    <section className={`result-notice outcome-${result.code}`}>
+      <strong>{result.code}</strong>
+      <span>{result.label}: +{result.points} pts</span>
+      <small>Your pick {result.predictedScore} · Actual {result.actualScore}</small>
+    </section>
+  )
+}
+
+function UserResultStrip({ results }) {
+  return (
+    <section className="user-results panel">
+      <div>
+        <span className="eyebrow">Your results</span>
+        <p>W = spot on 3pts · D = result 1pt · L = wrong 0pts</p>
+      </div>
+      <div className="user-result-chips">
+        {results.map((result) => (
+          <span className={`user-result-chip outcome-${result.code}`} key={result.roundNumber} title={`Round ${result.roundNumber}: ${result.label}`}>
+            {result.code}
+          </span>
+        ))}
+      </div>
+    </section>
   )
 }
 
