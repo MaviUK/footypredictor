@@ -70,6 +70,19 @@ export function scorePoints(fixture, homeGoals, awayGoals) {
   }
 }
 
+export function orderOptionsByColumn(options) {
+  const groups = {
+    H: options.filter((option) => option.result === 'H').slice(0, 2),
+    D: options.filter((option) => option.result === 'D').slice(0, 2),
+    A: options.filter((option) => option.result === 'A').slice(0, 2),
+  }
+
+  return [
+    groups.H[0], groups.D[0], groups.A[0],
+    groups.H[1], groups.D[1], groups.A[1],
+  ].filter(Boolean)
+}
+
 export function makeOptions(fixture, seed) {
   const actual = {
     homeGoals: fixture.full_time_home_goals,
@@ -81,20 +94,19 @@ export function makeOptions(fixture, seed) {
     D: [[0,0],[1,1],[2,2],[3,3]],
     A: [[0,1],[0,2],[1,2],[1,3],[2,3],[2,4]],
   }
-  const wanted = { H: 2, D: 2, A: 2 }
-  wanted[actual.result] -= 1
-  const options = [actual]
+  const groups = { H: [], D: [], A: [] }
+  groups[actual.result].push(actual)
+
   for (const result of ['H', 'D', 'A']) {
     const candidates = shuffle(pools[result], `${seed}:${result}`)
     for (const [homeGoals, awayGoals] of candidates) {
-      if (options.length >= 6) break
-      if (wanted[result] <= 0) break
+      if (groups[result].length >= 2) break
       if (homeGoals === actual.homeGoals && awayGoals === actual.awayGoals) continue
-      options.push({ homeGoals, awayGoals, result })
-      wanted[result] -= 1
+      groups[result].push({ homeGoals, awayGoals, result })
     }
   }
-  return shuffle(options, `${seed}:options`)
+
+  return orderOptionsByColumn([...groups.H, ...groups.D, ...groups.A])
 }
 
 export function json(statusCode, body) {
