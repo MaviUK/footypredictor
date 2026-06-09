@@ -47,25 +47,31 @@ function seasonLabel(game) {
   return game?.seasons?.display_name || game?.league_name || game?.game_date || 'Season'
 }
 
+function targetUserIdFromEvent(event, fallbackUserId) {
+  return event.queryStringParameters?.userId || fallbackUserId
+}
+
 export async function handler(event) {
   try {
     const supabase = getSupabase()
-    const user = await getUser(event, supabase)
+    const viewer = await getUser(event, supabase)
+    const targetUserId = targetUserIdFromEvent(event, viewer.id)
+    const isOwnProfile = targetUserId === viewer.id
 
     const profileResult = await supabase
       .from('user_profiles')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', targetUserId)
       .maybeSingle()
 
     if (profileResult.error) throw profileResult.error
+    if (!profileResult.data) return json(404, { error: 'Club profile not found' })
 
-    const profile = profileResult.data || {}
+    const profile = profileResult.data
     const predictionsResult = await supabase
       .from('predictions')
       .select('points, exact_score, correct_result, created_at, daily_game_fixtures(round_number, daily_games(id, game_date, league_name, seasons(display_name)))')
-      .eq('user_id', user.id)
-      .eq('is_auto', false)
+      .eq('user_id', targetUserId)
       .order('created_at')
 
     if (predictionsResult.error) throw predictionsResult.error
@@ -134,9 +140,11 @@ export async function handler(event) {
 
     return json(200, {
       profile: {
-        email: profile.email || user.email,
-        username: profile.username || user.user_metadata?.username,
-        clubName: profile.club_name || profile.username || user.user_metadata?.username || 'My Club',
+        userId: profile.user_id,
+        isOwnProfile,
+        email: profile.email,
+        username: profile.username,
+        clubName: profile.club_name || profile.username || profile.email || 'Club',
         badgeUrl: profile.badge_url || '',
         country: profile.country,
         competition: profile.competition,
