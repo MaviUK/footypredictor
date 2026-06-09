@@ -1,5 +1,9 @@
 import { getSupabase, londonDate, shuffle, scorePoints, json } from './_gameHelpers.js'
 
+export const config = {
+  schedule: '5 0 * * *',
+}
+
 function previousLondonDate() {
   const now = new Date()
   now.setUTCDate(now.getUTCDate() - 1)
@@ -11,24 +15,225 @@ function previousLondonDate() {
   }).format(now)
 }
 
-function movementFor(rank, totalPlayers) {
-  if (rank <= Math.max(1, Math.floor(totalPlayers * 0.15))) return 'promoted'
+function tierSize(level) {
+  return Number(level) === 1 ? 20 : 24
+}
+
+function tierSeasonLength(level) {
+  return tierSize(level) * 2 - 2
+}
+
+function movementFor(rank, totalPlayers, level) {
+  if (totalPlayers <= 1) return 'stayed'
+  if (Number(level) > 1 && rank <= Math.max(1, Math.floor(totalPlayers * 0.15))) return 'promoted'
   if (rank > Math.max(1, Math.floor(totalPlayers * 0.85))) return 'relegated'
   return 'stayed'
 }
 
+function nextLevel(before, movement) {
+  if (movement === 'promoted') return Math.max(1, Number(before || 1) - 1)
+  if (movement === 'relegated') return Number(before || 1) + 1
+  return Number(before || 1)
+}
+
+function isScheduledInvocation(event) {
+  const eventHeader = String(event.headers?.['x-nf-event'] || event.headers?.['x-netlify-event'] || '').toLowerCase()
+  return eventHeader === 'schedule' || eventHeader === 'scheduled'
+}
+
+function checkAuthorized(event) {
+  if (isScheduledInvocation(event)) return null
+
+  const expectedSecret = process.env.CLOSE_DAILY_GAME_SECRET
+  const providedSecret = event.headers?.['x-close-secret'] || event.queryStringParameters?.secret
+
+  if (!expectedSecret) {
+    return json(500, { error: 'Missing CLOSE_DAILY_GAME_SECRET. Add this in Netlify before manual closeout.' })
+  }
+
+  if (providedSecret !== expectedSecret) {
+    return json(401, { error: 'Unauthorized' })
+  }
+
+  return null
+}
+
+async function checked(step, query) {
+  const result = await query
+  if (result.error) {
+    const parts = [step, result.error.message, result.error.details, result.error.hint, result.error.code].filter(Boolean)
+    throw new Error(parts.join(': '))
+  }
+  return result
+}
+
+function predictionKey(userId, roundId) {
+  return `${userId}:${roundId}`
+}
+
+function rowForProfile(profile) {
+  return {
+    user_id: profile.user_id,
+    total_points: 0,
+    correct_scores: 0,
+    correct_results: 0,
+    tier_slot: Number(profile.tier_slot || 9999),
+  }
+}
+
+function sortRows(a, b) {
+  return b.total_points - a.total_points ||
+    b.correct_scores - a.correct_scores ||
+    b.correct_results - a.correct_results ||
+    a.tier_slot - b.tier_slot ||
+    String(a.user_id).localeCompare(String(b.user_id))
+}
+
+async function closeOneDailyGame(supabase, dailyGame) {
+  const roundsResult = await checked('rounds lookup', supabase
+    .from('daily_game_fixtures')
+    .select('id, options, fixtures(*)')
+    .eq('daily_game_id', dailyGame.id))
+
+  const rounds = roundsResult.data || []
+  if (!rounds.length) {
+    return { dailyGameId: dailyGame.id, skipped: true, reason: 'No fixtures', autoPredictions: 0, players: 0 }
+  }
+
+  const profilesResult = await checked('tier profiles lookup', supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('country', dailyGame.country)
+    .eq('competition', dailyGame.competition)
+    .not('tier_slot', 'is', null))
+
+  const profiles = profilesResult.data || []
+  if (!profiles.length) {
+    return { dailyGameId: dailyGame.id, skipped: true, reason: 'No profiles', autoPredictions: 0, players: 0 }
+  }
+
+  const allRoundIds = rounds.map((round) => round.id)
+  const predictionsResult = await checked('predictions lookup', supabase
+    .from('predictions')
+    .select('*')
+    .in('daily_game_fixture_id', allRoundIds))
+
+  const predictionKeys = new Set((predictionsResult.data || []).map((prediction) => predictionKey(prediction.user_id, prediction.daily_game_fixture_id)))
+  const autoPredictions = []
+
+  for (const profile of profiles) {
+    const level = Number(profile.pyramid_level || 1)
+    const seasonLength = tierSeasonLength(level)
+    const userRounds = shuffle(rounds, `${dailyGame.seed}:user:${profile.user_id}`).slice(0, seasonLength)
+
+    for (const round of userRounds) {
+      const key = predictionKey(profile.user_id, round.id)
+      if (predictionKeys.has(key)) continue
+
+      const option = shuffle(round.options || [], `cutoff:${dailyGame.game_date}:${profile.user_id}:${round.id}`)[0]
+      if (!option) continue
+
+      autoPredictions.push({
+        daily_game_fixture_id: round.id,
+        user_id: profile.user_id,
+        predicted_home_goals: Number(option.homeGoals),
+        predicted_away_goals: Number(option.awayGoals),
+        is_auto: true,
+        ...scorePoints(round.fixtures, Number(option.homeGoals), Number(option.awayGoals)),
+      })
+      predictionKeys.add(key)
+    }
+  }
+
+  for (let index = 0; index < autoPredictions.length; index += 500) {
+    await checked('auto predictions upsert', supabase
+      .from('predictions')
+      .upsert(autoPredictions.slice(index, index + 500), { onConflict: 'daily_game_fixture_id,user_id' }))
+  }
+
+  const finalPredictionsResult = await checked('final predictions lookup', supabase
+    .from('predictions')
+    .select('*')
+    .in('daily_game_fixture_id', allRoundIds))
+
+  const predictionByUser = new Map()
+  for (const prediction of finalPredictionsResult.data || []) {
+    if (!predictionByUser.has(prediction.user_id)) predictionByUser.set(prediction.user_id, new Map())
+    predictionByUser.get(prediction.user_id).set(prediction.daily_game_fixture_id, prediction)
+  }
+
+  const profilesByTier = new Map()
+  for (const profile of profiles) {
+    const level = Number(profile.pyramid_level || 1)
+    if (!profilesByTier.has(level)) profilesByTier.set(level, [])
+    profilesByTier.get(level).push(profile)
+  }
+
+  const results = []
+
+  for (const [level, tierProfiles] of profilesByTier.entries()) {
+    const tierRows = tierProfiles.map((profile) => {
+      const row = rowForProfile(profile)
+      const userPredictions = predictionByUser.get(profile.user_id) || new Map()
+      const userRounds = shuffle(rounds, `${dailyGame.seed}:user:${profile.user_id}`).slice(0, tierSeasonLength(level))
+
+      for (const round of userRounds) {
+        const prediction = userPredictions.get(round.id)
+        if (!prediction) continue
+        row.total_points += Number(prediction.points || 0)
+        row.correct_scores += prediction.exact_score ? 1 : 0
+        row.correct_results += prediction.correct_result ? 1 : 0
+      }
+
+      return row
+    }).sort(sortRows)
+
+    for (const [index, row] of tierRows.entries()) {
+      const rank = index + 1
+      const movement = movementFor(rank, tierRows.length, level)
+      results.push({
+        daily_game_id: dailyGame.id,
+        user_id: row.user_id,
+        total_points: row.total_points,
+        correct_scores: row.correct_scores,
+        correct_results: row.correct_results,
+        rank,
+        pyramid_level_before: Number(level),
+        pyramid_level_after: nextLevel(level, movement),
+        movement,
+      })
+    }
+  }
+
+  for (let index = 0; index < results.length; index += 500) {
+    await checked('daily results upsert', supabase
+      .from('daily_results')
+      .upsert(results.slice(index, index + 500), { onConflict: 'daily_game_id,user_id' }))
+  }
+
+  const overallWinner = [...results].sort((a, b) => b.total_points - a.total_points || b.correct_scores - a.correct_scores || b.correct_results - a.correct_results)[0]
+  const closeResult = await supabase
+    .from('daily_games')
+    .update({ status: 'closed', winner_user_id: overallWinner?.user_id || null, closed_at: new Date().toISOString() })
+    .eq('id', dailyGame.id)
+
+  if (closeResult.error) throw closeResult.error
+
+  return {
+    dailyGameId: dailyGame.id,
+    country: dailyGame.country,
+    competition: dailyGame.competition,
+    leagueName: dailyGame.league_name,
+    autoPredictions: autoPredictions.length,
+    players: results.length,
+    winnerUserId: overallWinner?.user_id || null,
+  }
+}
+
 export async function handler(event) {
   try {
-    const expectedSecret = process.env.CLOSE_DAILY_GAME_SECRET
-    const providedSecret = event.headers['x-close-secret'] || event.queryStringParameters?.secret
-
-    if (!expectedSecret) {
-      return json(500, { error: 'Missing CLOSE_DAILY_GAME_SECRET. Add this in Netlify before enabling closeout.' })
-    }
-
-    if (providedSecret !== expectedSecret) {
-      return json(401, { error: 'Unauthorized' })
-    }
+    const authError = checkAuthorized(event)
+    if (authError) return authError
 
     const supabase = getSupabase()
     const today = londonDate()
@@ -38,131 +243,34 @@ export async function handler(event) {
       return json(409, { error: 'Refusing to close today before the day has ended.' })
     }
 
-    const dailyGameResult = await supabase
+    let query = supabase
       .from('daily_games')
       .select('*')
       .eq('game_date', gameDate)
-      .maybeSingle()
+      .neq('status', 'closed')
 
-    if (dailyGameResult.error) throw dailyGameResult.error
-    if (!dailyGameResult.data) return json(404, { error: `No daily game found for ${gameDate}` })
-    if (dailyGameResult.data.status === 'closed') return json(200, { message: 'Already closed' })
+    if (event.queryStringParameters?.country) query = query.eq('country', event.queryStringParameters.country)
+    if (event.queryStringParameters?.competition) query = query.eq('competition', event.queryStringParameters.competition)
 
-    const roundsResult = await supabase
-      .from('daily_game_fixtures')
-      .select('id, options, fixtures(*)')
-      .eq('daily_game_id', dailyGameResult.data.id)
+    const dailyGamesResult = await checked('daily games lookup', query)
+    const dailyGames = dailyGamesResult.data || []
 
-    if (roundsResult.error) throw roundsResult.error
-    if ((roundsResult.data || []).length < 38) return json(409, { error: 'This game does not have 38 fixtures yet.' })
-
-    const profilesResult = await supabase.from('user_profiles').select('*')
-    if (profilesResult.error) throw profilesResult.error
-
-    const roundIds = roundsResult.data.map((round) => round.id)
-    const predictionsResult = await supabase
-      .from('predictions')
-      .select('*')
-      .in('daily_game_fixture_id', roundIds)
-
-    if (predictionsResult.error) throw predictionsResult.error
-
-    const predictionKeys = new Set(predictionsResult.data.map((prediction) => `${prediction.user_id}:${prediction.daily_game_fixture_id}`))
-    const autoPredictions = []
-
-    for (const profile of profilesResult.data) {
-      for (const round of roundsResult.data) {
-        const key = `${profile.user_id}:${round.id}`
-        if (predictionKeys.has(key)) continue
-        const [option] = shuffle(round.options, `auto:${gameDate}:${profile.user_id}:${round.id}`)
-        autoPredictions.push({
-          daily_game_fixture_id: round.id,
-          user_id: profile.user_id,
-          predicted_home_goals: option.homeGoals,
-          predicted_away_goals: option.awayGoals,
-          is_auto: true,
-          ...scorePoints(round.fixtures, option.homeGoals, option.awayGoals),
-        })
-      }
+    if (!dailyGames.length) {
+      return json(200, { gameDate, message: 'No open daily games to close', closedGames: [] })
     }
 
-    for (let i = 0; i < autoPredictions.length; i += 500) {
-      const { error } = await supabase.from('predictions').insert(autoPredictions.slice(i, i + 500))
-      if (error) throw error
+    const closedGames = []
+    for (const dailyGame of dailyGames) {
+      closedGames.push(await closeOneDailyGame(supabase, dailyGame))
     }
-
-    const finalPredictionsResult = await supabase
-      .from('predictions')
-      .select('*')
-      .in('daily_game_fixture_id', roundIds)
-
-    if (finalPredictionsResult.error) throw finalPredictionsResult.error
-
-    const totals = new Map()
-    for (const prediction of finalPredictionsResult.data) {
-      const row = totals.get(prediction.user_id) || {
-        user_id: prediction.user_id,
-        total_points: 0,
-        correct_scores: 0,
-        correct_results: 0,
-      }
-      row.total_points += prediction.points
-      row.correct_scores += prediction.exact_score ? 1 : 0
-      row.correct_results += prediction.correct_result ? 1 : 0
-      totals.set(prediction.user_id, row)
-    }
-
-    const ordered = [...totals.values()].sort((a, b) =>
-      b.total_points - a.total_points || b.correct_scores - a.correct_scores || b.correct_results - a.correct_results,
-    )
-
-    const profileMap = new Map(profilesResult.data.map((profile) => [profile.user_id, profile]))
-    const results = ordered.map((row, index) => {
-      const rank = index + 1
-      const before = profileMap.get(row.user_id)?.pyramid_level || 1
-      const movement = movementFor(rank, ordered.length)
-      const after = movement === 'promoted' ? Math.max(1, before - 1) : movement === 'relegated' ? before + 1 : before
-      return {
-        daily_game_id: dailyGameResult.data.id,
-        user_id: row.user_id,
-        total_points: row.total_points,
-        correct_scores: row.correct_scores,
-        correct_results: row.correct_results,
-        rank,
-        pyramid_level_before: before,
-        pyramid_level_after: after,
-        movement,
-      }
-    })
-
-    for (let i = 0; i < results.length; i += 500) {
-      const { error } = await supabase.from('daily_results').upsert(results.slice(i, i + 500), { onConflict: 'daily_game_id,user_id' })
-      if (error) throw error
-    }
-
-    for (const result of results) {
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({ pyramid_level: result.pyramid_level_after })
-        .eq('user_id', result.user_id)
-      if (error) throw error
-    }
-
-    const winner = results[0]
-    const closeResult = await supabase
-      .from('daily_games')
-      .update({ status: 'closed', winner_user_id: winner?.user_id, closed_at: new Date().toISOString() })
-      .eq('id', dailyGameResult.data.id)
-
-    if (closeResult.error) throw closeResult.error
 
     return json(200, {
       gameDate,
-      autoPredictions: autoPredictions.length,
-      players: results.length,
-      winnerUserId: winner?.user_id || null,
+      closedGames,
+      autoPredictions: closedGames.reduce((sum, game) => sum + Number(game.autoPredictions || 0), 0),
+      players: closedGames.reduce((sum, game) => sum + Number(game.players || 0), 0),
     })
   } catch (error) {
-    return json(500, { error: error.message })
+    return json(500, { error: error.message || 'Could not close daily game' })
   }
 }
