@@ -8,24 +8,6 @@ const RESULT_GROUPS = [
   ['A', 'Away win'],
 ]
 
-const COUNTRY_OPTIONS = [
-  'Northern Ireland',
-  'England',
-  'Scotland',
-  'Wales',
-  'Republic of Ireland',
-  'France',
-  'Germany',
-  'Spain',
-  'Italy',
-  'Netherlands',
-  'Portugal',
-  'United States',
-  'Canada',
-  'Australia',
-  'Other',
-]
-
 const TABLE_COLUMNS = [
   ['played', 'P'],
   ['won', 'W'],
@@ -40,13 +22,14 @@ const TABLE_COLUMNS = [
 function App() {
   const [session, setSession] = useState(null)
   const [game, setGame] = useState(null)
+  const [availableLeagues, setAvailableLeagues] = useState([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [selectedOptionKey, setSelectedOptionKey] = useState('')
   const [lastResult, setLastResult] = useState(null)
   const [error, setError] = useState('')
   const [authMode, setAuthMode] = useState('sign-in')
-  const [authForm, setAuthForm] = useState({ email: '', username: '', country: 'Northern Ireland', password: '' })
+  const [authForm, setAuthForm] = useState({ email: '', username: '', country: '', competition: '', leagueName: '', password: '' })
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -58,6 +41,8 @@ function App() {
       setSession(nextSession)
     })
 
+    loadAvailableLeagues()
+
     return () => listener.subscription.unsubscribe()
   }, [])
 
@@ -68,6 +53,46 @@ function App() {
       setGame(null)
     }
   }, [session])
+
+  async function loadAvailableLeagues() {
+    const { data, error: leaguesError } = await supabase
+      .from('seasons')
+      .select('country, competition, league_name')
+      .eq('is_complete', true)
+      .order('country')
+      .order('league_name')
+
+    if (leaguesError) {
+      setError(leaguesError.message)
+      return
+    }
+
+    const seen = new Set()
+    const leagues = []
+
+    for (const season of data || []) {
+      const country = season.country || 'England'
+      const competition = season.competition || 'E0'
+      const leagueName = season.league_name || competition
+      const key = `${country}:${competition}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      leagues.push({ country, competition, leagueName })
+    }
+
+    setAvailableLeagues(leagues)
+
+    if (leagues.length) {
+      setAuthForm((current) => current.competition
+        ? current
+        : {
+          ...current,
+          country: leagues[0].country,
+          competition: leagues[0].competition,
+          leagueName: leagues[0].leagueName,
+        })
+    }
+  }
 
   async function loadGame(activeSession = session) {
     if (!activeSession?.access_token) return
@@ -141,14 +166,13 @@ function App() {
 
     try {
       const username = cleanUsername(authForm.username)
-      const country = authForm.country || 'Northern Ireland'
 
       if (authMode === 'sign-up' && username.length < 3) {
         throw new Error('Username must be at least 3 characters')
       }
 
-      if (authMode === 'sign-up' && !country) {
-        throw new Error('Please choose your country')
+      if (authMode === 'sign-up' && (!authForm.country || !authForm.competition)) {
+        throw new Error('Please choose an imported prediction league')
       }
 
       const authAction = authMode === 'sign-up'
@@ -156,7 +180,12 @@ function App() {
           email: authForm.email,
           password: authForm.password,
           options: {
-            data: { username, country },
+            data: {
+              username,
+              country: authForm.country,
+              competition: authForm.competition,
+              leagueName: authForm.leagueName,
+            },
           },
         })
         : supabase.auth.signInWithPassword({
@@ -194,7 +223,7 @@ function App() {
           <div>
             <p className="eyebrow">Sign in</p>
             <h2>{authMode === 'sign-up' ? 'Create your account' : 'Welcome back'}</h2>
-            <p>Pick your country league when signing up. Your daily table is only against players from that country.</p>
+            <p>Choose from imported fixture leagues only. If a league is not imported, it will not appear here.</p>
           </div>
 
           <form onSubmit={handleAuth}>
@@ -225,14 +254,20 @@ function App() {
                 </label>
 
                 <label>
-                  Country league
+                  Prediction league
                   <select
-                    value={authForm.country}
-                    onChange={(event) => setAuthForm({ ...authForm, country: event.target.value })}
+                    value={leagueValue(authForm)}
+                    onChange={(event) => {
+                      const selected = availableLeagues.find((league) => leagueValue(league) === event.target.value)
+                      if (selected) setAuthForm({ ...authForm, ...selected })
+                    }}
                     required
                   >
-                    {COUNTRY_OPTIONS.map((country) => (
-                      <option value={country} key={country}>{country}</option>
+                    {availableLeagues.length === 0 && <option value="">No imported leagues found</option>}
+                    {availableLeagues.map((league) => (
+                      <option value={leagueValue(league)} key={leagueValue(league)}>
+                        {league.country} - {league.leagueName}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -250,7 +285,7 @@ function App() {
               />
             </label>
 
-            <button type="submit" disabled={loading}>
+            <button type="submit" disabled={loading || (authMode === 'sign-up' && availableLeagues.length === 0)}>
               {loading ? 'Please wait...' : authMode === 'sign-up' ? 'Sign up' : 'Sign in'}
             </button>
 
@@ -272,7 +307,7 @@ function App() {
             <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
           </nav>
 
-          {game?.country && <p className="country-badge">Country league: {game.country}</p>}
+          {game?.country && <p className="country-badge">League: {game.country}{game.leagueName ? ` - ${game.leagueName}` : ''}{game.tier?.name ? ` · ${game.tier.name}` : ''}</p>}
 
           {game?.resultHistory?.length > 0 && <UserResultStrip results={game.resultHistory} />}
 
@@ -320,21 +355,25 @@ function App() {
             <section className="panel">
               <p className="eyebrow">Season complete</p>
               <h2>You scored {game.userScore.totalPoints} points.</h2>
-              <p>Come back tomorrow for a new randomly selected Premier League season.</p>
+              <p>Come back tomorrow for a new randomly selected season.</p>
             </section>
           )}
 
-          {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} country={game?.country} />}
+          {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} game={game} />}
         </>
       )}
     </main>
   )
 }
 
-function DailyLeaderboard({ rows, country }) {
+function DailyLeaderboard({ rows, game }) {
+  const title = game?.tier?.name
+    ? `${game.tier.name} table`
+    : 'Today\'s table'
+
   return (
     <section className="panel daily-table-panel">
-      <p className="eyebrow">Today&apos;s table{country ? ` · ${country}` : ''}</p>
+      <p className="eyebrow">{title}</p>
       <div className="daily-table">
         <div className="daily-table-row daily-table-head">
           <span>#</span>
@@ -477,6 +516,10 @@ function FormStrip({ label, value }) {
       )}
     </div>
   )
+}
+
+function leagueValue(league) {
+  return league.country && league.competition ? `${league.country}:${league.competition}` : ''
 }
 
 function cleanUsername(value) {
