@@ -9,6 +9,32 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+function timeoutResult(promise, milliseconds, message) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      window.setTimeout(() => resolve({ data: null, error: new Error(message) }), milliseconds)
+    }),
+  ])
+}
+
+if (typeof window !== 'undefined') {
+  const originalSignInWithPassword = supabase.auth.signInWithPassword.bind(supabase.auth)
+  const originalSignUp = supabase.auth.signUp.bind(supabase.auth)
+
+  supabase.auth.signInWithPassword = (...args) => timeoutResult(
+    originalSignInWithPassword(...args),
+    15000,
+    'Sign in timed out. Check your connection and try again.',
+  )
+
+  supabase.auth.signUp = (...args) => timeoutResult(
+    originalSignUp(...args),
+    15000,
+    'Sign up timed out. Check your connection and try again.',
+  )
+}
+
 function getNextCutoff() {
   const now = new Date()
   const cutoff = new Date(now)
