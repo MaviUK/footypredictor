@@ -24,6 +24,7 @@ function App() {
   const [game, setGame] = useState(null)
   const [clubProfile, setClubProfile] = useState(null)
   const [clubForm, setClubForm] = useState({ clubName: '', badgeUrl: '' })
+  const [viewingUserId, setViewingUserId] = useState(null)
   const [availableLeagues, setAvailableLeagues] = useState([])
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
@@ -53,10 +54,11 @@ function App() {
   useEffect(() => {
     if (session) {
       loadGame(session)
-      loadClubProfile(session)
+      loadClubProfile(session, session.user.id)
     } else {
       setGame(null)
       setClubProfile(null)
+      setViewingUserId(null)
       setView('game')
     }
   }, [session])
@@ -109,9 +111,7 @@ function App() {
 
     try {
       const res = await fetch('/.netlify/functions/getDailyGame', {
-        headers: {
-          Authorization: `Bearer ${activeSession.access_token}`,
-        },
+        headers: { Authorization: `Bearer ${activeSession.access_token}` },
       })
       const text = await res.text()
       let data = {}
@@ -122,10 +122,7 @@ function App() {
         data = { error: text || 'Could not load today\'s game' }
       }
 
-      if (!res.ok) {
-        throw new Error(data.error || data.message || 'Could not load today\'s game')
-      }
-
+      if (!res.ok) throw new Error(data.error || data.message || 'Could not load today\'s game')
       setGame(data)
     } catch (err) {
       setError(err.message)
@@ -134,24 +131,23 @@ function App() {
     }
   }
 
-  async function loadClubProfile(activeSession = session) {
+  async function loadClubProfile(activeSession = session, userId = activeSession?.user?.id) {
     if (!activeSession?.access_token) return
 
     setProfileLoading(true)
+    setError('')
 
     try {
-      const res = await fetch('/.netlify/functions/getClubProfile', {
-        headers: {
-          Authorization: `Bearer ${activeSession.access_token}`,
-        },
+      const suffix = userId ? `?userId=${encodeURIComponent(userId)}` : ''
+      const res = await fetch(`/.netlify/functions/getClubProfile${suffix}`, {
+        headers: { Authorization: `Bearer ${activeSession.access_token}` },
       })
       const data = await res.json()
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Could not load club profile')
-      }
+      if (!res.ok) throw new Error(data.error || 'Could not load club profile')
 
       setClubProfile(data)
+      setViewingUserId(data.profile?.userId || userId)
       setClubForm({
         clubName: data.profile?.clubName || '',
         badgeUrl: data.profile?.badgeUrl || '',
@@ -163,8 +159,20 @@ function App() {
     }
   }
 
+  async function openClubProfile(userId) {
+    if (!session?.access_token || !userId) return
+    setView('profile')
+    await loadClubProfile(session, userId)
+  }
+
+  async function openOwnClubProfile() {
+    if (!session?.user?.id) return
+    await openClubProfile(session.user.id)
+  }
+
   async function saveClubProfile(nextValues = clubForm) {
     if (!session?.access_token) return
+    if (clubProfile?.profile && clubProfile.profile.isOwnProfile === false) return
 
     setProfileLoading(true)
     setError('')
@@ -180,11 +188,8 @@ function App() {
       })
       const data = await res.json()
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Could not save club profile')
-      }
-
-      await loadClubProfile()
+      if (!res.ok) throw new Error(data.error || 'Could not save club profile')
+      await loadClubProfile(session, session.user.id)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -195,6 +200,7 @@ function App() {
   async function uploadBadge(event) {
     const file = event.target.files?.[0]
     if (!file || !session?.user?.id) return
+    if (clubProfile?.profile && clubProfile.profile.isOwnProfile === false) return
 
     setProfileLoading(true)
     setError('')
@@ -244,15 +250,12 @@ function App() {
       })
 
       const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Could not submit prediction')
-      }
+      if (!res.ok) throw new Error(data.error || 'Could not submit prediction')
 
       setLastResult(data.result)
       setSelectedOptionKey('')
       await loadGame()
-      await loadClubProfile()
+      if (viewingUserId) await loadClubProfile(session, viewingUserId)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -267,14 +270,8 @@ function App() {
 
     try {
       const username = cleanUsername(authForm.username)
-
-      if (authMode === 'sign-up' && username.length < 3) {
-        throw new Error('Username must be at least 3 characters')
-      }
-
-      if (authMode === 'sign-up' && (!authForm.country || !authForm.competition)) {
-        throw new Error('Please choose an imported prediction league')
-      }
+      if (authMode === 'sign-up' && username.length < 3) throw new Error('Username must be at least 3 characters')
+      if (authMode === 'sign-up' && (!authForm.country || !authForm.competition)) throw new Error('Please choose an imported prediction league')
 
       const authAction = authMode === 'sign-up'
         ? supabase.auth.signUp({
@@ -289,16 +286,10 @@ function App() {
             },
           },
         })
-        : supabase.auth.signInWithPassword({
-          email: authForm.email,
-          password: authForm.password,
-        })
+        : supabase.auth.signInWithPassword({ email: authForm.email, password: authForm.password })
 
       const { error: authError } = await authAction
-
-      if (authError) {
-        throw authError
-      }
+      if (authError) throw authError
     } catch (err) {
       setError(err.message)
     } finally {
@@ -328,75 +319,27 @@ function App() {
           </div>
 
           <form onSubmit={handleAuth}>
-            <label>
-              Email
-              <input
-                type="email"
-                value={authForm.email}
-                onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })}
-                required
-              />
-            </label>
+            <label>Email<input type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} required /></label>
 
             {authMode === 'sign-up' && (
               <>
-                <label>
-                  Username
-                  <input
-                    type="text"
-                    minLength="3"
-                    maxLength="20"
-                    pattern="[A-Za-z0-9_]+"
-                    value={authForm.username}
-                    onChange={(event) => setAuthForm({ ...authForm, username: cleanUsername(event.target.value) })}
-                    placeholder="e.g. gavin_fc"
-                    required
-                  />
-                </label>
-
+                <label>Username<input type="text" minLength="3" maxLength="20" pattern="[A-Za-z0-9_]+" value={authForm.username} onChange={(event) => setAuthForm({ ...authForm, username: cleanUsername(event.target.value) })} placeholder="e.g. gavin_fc" required /></label>
                 <label>
                   Prediction league
-                  <select
-                    value={leagueValue(authForm)}
-                    onChange={(event) => {
-                      const selected = availableLeagues.find((league) => leagueValue(league) === event.target.value)
-                      if (selected) setAuthForm({ ...authForm, ...selected })
-                    }}
-                    required
-                  >
+                  <select value={leagueValue(authForm)} onChange={(event) => {
+                    const selected = availableLeagues.find((league) => leagueValue(league) === event.target.value)
+                    if (selected) setAuthForm({ ...authForm, ...selected })
+                  }} required>
                     {availableLeagues.length === 0 && <option value="">No imported leagues found</option>}
-                    {availableLeagues.map((league) => (
-                      <option value={leagueValue(league)} key={leagueValue(league)}>
-                        {league.country} - {league.leagueName}
-                      </option>
-                    ))}
+                    {availableLeagues.map((league) => <option value={leagueValue(league)} key={leagueValue(league)}>{league.country} - {league.leagueName}</option>)}
                   </select>
                 </label>
               </>
             )}
 
-            <label>
-              Password
-              <input
-                type="password"
-                minLength="6"
-                value={authForm.password}
-                onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
-                required
-              />
-            </label>
-
-            <button type="submit" disabled={loading || (authMode === 'sign-up' && availableLeagues.length === 0)}>
-              {loading ? 'Please wait...' : authMode === 'sign-up' ? 'Sign up' : 'Sign in'}
-            </button>
-
-            <button
-              className="link-button"
-              type="button"
-              onClick={() => setAuthMode(authMode === 'sign-up' ? 'sign-in' : 'sign-up')}
-            >
-              {authMode === 'sign-up' ? 'Already have an account?' : 'Need an account?'}
-            </button>
+            <label>Password<input type="password" minLength="6" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} required /></label>
+            <button type="submit" disabled={loading || (authMode === 'sign-up' && availableLeagues.length === 0)}>{loading ? 'Please wait...' : authMode === 'sign-up' ? 'Sign up' : 'Sign in'}</button>
+            <button className="link-button" type="button" onClick={() => setAuthMode(authMode === 'sign-up' ? 'sign-in' : 'sign-up')}>{authMode === 'sign-up' ? 'Already have an account?' : 'Need an account?'}</button>
           </form>
         </section>
       )}
@@ -404,10 +347,10 @@ function App() {
       {session && (
         <>
           <nav className="topbar compact-topbar app-nav">
-            <span>{clubProfile?.profile?.clubName || session.user.user_metadata?.username || session.user.email}</span>
+            <button className="club-name-button" type="button" onClick={openOwnClubProfile}>{clubProfile?.profile?.clubName || session.user.user_metadata?.username || session.user.email}</button>
             <div className="topbar-actions">
               <button type="button" onClick={() => setView('game')}>Game</button>
-              <button type="button" onClick={() => setView('profile')}>Club</button>
+              <button type="button" onClick={openOwnClubProfile}>Club</button>
               <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
             </div>
           </nav>
@@ -420,65 +363,35 @@ function App() {
               profileLoading={profileLoading}
               saveClubProfile={saveClubProfile}
               uploadBadge={uploadBadge}
-              refresh={() => loadClubProfile()}
+              refresh={() => loadClubProfile(session, viewingUserId || session.user.id)}
+              openOwnClubProfile={openOwnClubProfile}
             />
           )}
 
           {view === 'game' && (
             <>
               {game?.country && <p className="country-badge">League: {game.country}{game.leagueName ? ` - ${game.leagueName}` : ''}{game.tier?.name ? ` · ${game.tier.name}` : ''}</p>}
-
               {game?.resultHistory?.length > 0 && <UserResultStrip results={game.resultHistory} />}
-
               {loading && <section className="panel">Loading today&apos;s game...</section>}
 
               {!loading && game?.currentRound && (
                 <section className="game-layout">
                   <article className="panel fixture-panel compact-fixture">
-                    <div className="round-meta">
-                      <span>Round {game.currentRound.roundNumber}/{game.totalRounds}</span>
-                      <strong>{game.season.displayName}</strong>
-                    </div>
-
+                    <div className="round-meta"><span>Round {game.currentRound.roundNumber}/{game.totalRounds}</span><strong>{game.season.displayName}</strong></div>
                     <div className="fixture-date">{formatFixtureDate(game.currentRound.fixtureDate)}</div>
-
-                    <div className="match-title compact-match-title">
-                      <h2>{game.currentRound.home.name}</h2>
-                      <span>v</span>
-                      <h2>{game.currentRound.away.name}</h2>
-                    </div>
-
-                    <div className="scoreboard compact-scoreboard">
-                      <TeamBlock side="Home" team={game.currentRound.home} />
-                      <TeamBlock side="Away" team={game.currentRound.away} />
-                    </div>
-
-                    <ResultChoices
-                      options={game.currentRound.options}
-                      submitting={submitting}
-                      selectedOptionKey={selectedOptionKey}
-                      submitPrediction={submitPrediction}
-                    />
+                    <div className="match-title compact-match-title"><h2>{game.currentRound.home.name}</h2><span>v</span><h2>{game.currentRound.away.name}</h2></div>
+                    <div className="scoreboard compact-scoreboard"><TeamBlock side="Home" team={game.currentRound.home} /><TeamBlock side="Away" team={game.currentRound.away} /></div>
+                    <ResultChoices options={game.currentRound.options} submitting={submitting} selectedOptionKey={selectedOptionKey} submitPrediction={submitPrediction} />
                   </article>
 
                   <aside className="panel score-panel compact-score-panel">
-                    <p className="eyebrow">Your score</p>
-                    <h2>{game.userScore.totalPoints} pts</h2>
-                    <p>{game.userScore.correctScores} exact · {game.userScore.correctResults} results</p>
-                    <p className="muted">W = 3pts · D = 1pt · L = 0pts</p>
+                    <p className="eyebrow">Your score</p><h2>{game.userScore.totalPoints} pts</h2><p>{game.userScore.correctScores} exact · {game.userScore.correctResults} results</p><p className="muted">W = 3pts · D = 1pt · L = 0pts</p>
                   </aside>
                 </section>
               )}
 
-              {!loading && game?.completed && (
-                <section className="panel">
-                  <p className="eyebrow">Season complete</p>
-                  <h2>You scored {game.userScore.totalPoints} points.</h2>
-                  <p>Come back tomorrow for a new randomly selected season.</p>
-                </section>
-              )}
-
-              {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} game={game} />}
+              {!loading && game?.completed && <section className="panel"><p className="eyebrow">Season complete</p><h2>You scored {game.userScore.totalPoints} points.</h2><p>Come back tomorrow for a new randomly selected season.</p></section>}
+              {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} game={game} openClubProfile={openClubProfile} />}
             </>
           )}
         </>
@@ -487,273 +400,85 @@ function App() {
   )
 }
 
-function ClubProfilePage({ profileData, clubForm, setClubForm, profileLoading, saveClubProfile, uploadBadge, refresh }) {
+function ClubProfilePage({ profileData, clubForm, setClubForm, profileLoading, saveClubProfile, uploadBadge, refresh, openOwnClubProfile }) {
   const profile = profileData?.profile || {}
   const stats = profileData?.stats || {}
   const seasons = profileData?.seasons || []
+  const isOwnProfile = profile.isOwnProfile !== false
 
   return (
     <section className="profile-stack">
       <article className="panel club-profile-hero">
-        <div className="club-badge">
-          {clubForm.badgeUrl ? <img src={clubForm.badgeUrl} alt="Club badge" /> : <span>{clubInitials(clubForm.clubName || profile.clubName)}</span>}
-        </div>
+        <div className="club-badge">{clubForm.badgeUrl ? <img src={clubForm.badgeUrl} alt="Club badge" /> : <span>{clubInitials(clubForm.clubName || profile.clubName)}</span>}</div>
         <div>
-          <p className="eyebrow">Club profile</p>
-          <h2>{profile.clubName || 'My Club'}</h2>
+          <p className="eyebrow">{isOwnProfile ? 'Your club profile' : 'Club profile'}</p>
+          <h2>{profile.clubName || 'Club'}</h2>
           <p className="muted">{profile.country} · {profile.leagueName} · {profile.tierName}</p>
+          {!isOwnProfile && <button className="link-button" type="button" onClick={openOwnClubProfile}>Back to my club</button>}
         </div>
       </article>
 
-      <article className="panel club-editor">
-        <label>
-          Club name
-          <input
-            type="text"
-            maxLength="40"
-            value={clubForm.clubName}
-            onChange={(event) => setClubForm({ ...clubForm, clubName: event.target.value })}
-            placeholder="Enter club name"
-          />
-        </label>
-        <label>
-          Club badge
-          <input type="file" accept="image/*" onChange={uploadBadge} disabled={profileLoading} />
-        </label>
-        <button type="button" onClick={() => saveClubProfile()} disabled={profileLoading}>
-          {profileLoading ? 'Saving...' : 'Save club'}
-        </button>
-        <button type="button" className="link-button" onClick={refresh} disabled={profileLoading}>Refresh stats</button>
-      </article>
+      {isOwnProfile && (
+        <article className="panel club-editor">
+          <label>Club name<input type="text" maxLength="40" value={clubForm.clubName} onChange={(event) => setClubForm({ ...clubForm, clubName: event.target.value })} placeholder="Enter club name" /></label>
+          <label>Club badge<input type="file" accept="image/*" onChange={uploadBadge} disabled={profileLoading} /></label>
+          <button type="button" onClick={() => saveClubProfile()} disabled={profileLoading}>{profileLoading ? 'Saving...' : 'Save club'}</button>
+          <button type="button" className="link-button" onClick={refresh} disabled={profileLoading}>Refresh stats</button>
+        </article>
+      )}
 
-      <article className="panel">
-        <p className="eyebrow">All-time stats</p>
-        <div className="stats-grid">
-          <StatCard label="Seasons" value={stats.seasonsPlayed} />
-          <StatCard label="Played" value={stats.totalPlayed} />
-          <StatCard label="Points" value={stats.totalPoints} />
-          <StatCard label="Wins" value={stats.totalWins} />
-          <StatCard label="Draws" value={stats.totalDraws} />
-          <StatCard label="Defeats" value={stats.totalLosses} />
-          <StatCard label="Win %" value={`${displayValue(stats.winPercentage)}%`} />
-          <StatCard label="Draw %" value={`${displayValue(stats.drawPercentage)}%`} />
-          <StatCard label="Loss %" value={`${displayValue(stats.lossPercentage)}%`} />
-          <StatCard label="Best W streak" value={stats.longestWinningStreak} />
-          <StatCard label="Best D streak" value={stats.longestDrawStreak} />
-          <StatCard label="Worst L streak" value={stats.longestLosingStreak} />
-        </div>
-      </article>
-
-      <article className="panel best-worst-grid">
-        <SeasonSummary title="Best season" season={stats.bestSeason} />
-        <SeasonSummary title="Worst season" season={stats.worstSeason} />
-      </article>
-
-      <article className="panel daily-table-panel">
-        <p className="eyebrow">Season history</p>
-        <div className="daily-table">
-          <div className="daily-table-row profile-season-row daily-table-head">
-            <span>Season</span>
-            <span>P</span>
-            <span>W</span>
-            <span>D</span>
-            <span>L</span>
-            <span>PTS</span>
-            <span>W%</span>
-          </div>
-          {seasons.length === 0 && <p className="muted">No completed picks yet.</p>}
-          {seasons.map((season) => (
-            <div className="daily-table-row profile-season-row" key={season.id}>
-              <strong>{season.label}</strong>
-              <span>{displayValue(season.played)}</span>
-              <span>{displayValue(season.wins)}</span>
-              <span>{displayValue(season.draws)}</span>
-              <span>{displayValue(season.losses)}</span>
-              <span>{displayValue(season.points)}</span>
-              <span>{displayValue(season.winPercentage)}%</span>
-            </div>
-          ))}
-        </div>
-      </article>
+      <article className="panel"><p className="eyebrow">All-time stats</p><div className="stats-grid"><StatCard label="Seasons" value={stats.seasonsPlayed} /><StatCard label="Played" value={stats.totalPlayed} /><StatCard label="Points" value={stats.totalPoints} /><StatCard label="Wins" value={stats.totalWins} /><StatCard label="Draws" value={stats.totalDraws} /><StatCard label="Defeats" value={stats.totalLosses} /><StatCard label="Win %" value={`${displayValue(stats.winPercentage)}%`} /><StatCard label="Draw %" value={`${displayValue(stats.drawPercentage)}%`} /><StatCard label="Loss %" value={`${displayValue(stats.lossPercentage)}%`} /><StatCard label="Best W streak" value={stats.longestWinningStreak} /><StatCard label="Best D streak" value={stats.longestDrawStreak} /><StatCard label="Worst L streak" value={stats.longestLosingStreak} /></div></article>
+      <article className="panel best-worst-grid"><SeasonSummary title="Best season" season={stats.bestSeason} /><SeasonSummary title="Worst season" season={stats.worstSeason} /></article>
+      <article className="panel daily-table-panel"><p className="eyebrow">Season history</p><div className="daily-table"><div className="daily-table-row profile-season-row daily-table-head"><span>Season</span><span>P</span><span>W</span><span>D</span><span>L</span><span>PTS</span><span>W%</span></div>{seasons.length === 0 && <p className="muted">No completed picks yet.</p>}{seasons.map((season) => <div className="daily-table-row profile-season-row" key={season.id}><strong>{season.label}</strong><span>{displayValue(season.played)}</span><span>{displayValue(season.wins)}</span><span>{displayValue(season.draws)}</span><span>{displayValue(season.losses)}</span><span>{displayValue(season.points)}</span><span>{displayValue(season.winPercentage)}%</span></div>)}</div></article>
     </section>
   )
 }
 
 function StatCard({ label, value }) {
-  return (
-    <div className="stat-card">
-      <span>{label}</span>
-      <strong>{displayValue(value)}</strong>
-    </div>
-  )
+  return <div className="stat-card"><span>{label}</span><strong>{displayValue(value)}</strong></div>
 }
 
 function SeasonSummary({ title, season }) {
-  return (
-    <div className="season-summary">
-      <p className="eyebrow">{title}</p>
-      {season ? (
-        <>
-          <h3>{season.label}</h3>
-          <p>{season.points} pts · {season.wins}W {season.draws}D {season.losses}L</p>
-        </>
-      ) : (
-        <p className="muted">No season yet.</p>
-      )}
-    </div>
-  )
+  return <div className="season-summary"><p className="eyebrow">{title}</p>{season ? <><h3>{season.label}</h3><p>{season.points} pts · {season.wins}W {season.draws}D {season.losses}L</p></> : <p className="muted">No season yet.</p>}</div>
 }
 
-function DailyLeaderboard({ rows, game }) {
-  const title = game?.tier?.name
-    ? `${game.tier.name} table`
-    : 'Today\'s table'
-
+function DailyLeaderboard({ rows, game, openClubProfile }) {
+  const title = game?.tier?.name ? `${game.tier.name} table` : 'Today\'s table'
   return (
     <section className="panel daily-table-panel">
       <p className="eyebrow">{title}</p>
       <div className="daily-table">
-        <div className="daily-table-row daily-table-head">
-          <span>#</span>
-          <span>User</span>
-          <span>P</span>
-          <span>W</span>
-          <span>D</span>
-          <span>L</span>
-          <span>PTS</span>
-        </div>
-        {rows.map((row, index) => (
-          <div className="daily-table-row" key={row.userId}>
-            <span>{index + 1}</span>
-            <strong>{row.displayName || row.username || row.email || 'Player'}</strong>
-            <span>{displayValue(row.played)}</span>
-            <span>{displayValue(row.wins)}</span>
-            <span>{displayValue(row.draws)}</span>
-            <span>{displayValue(row.losses)}</span>
-            <span>{displayValue(row.totalPoints)}</span>
-          </div>
-        ))}
+        <div className="daily-table-row daily-table-head"><span>#</span><span>User</span><span>P</span><span>W</span><span>D</span><span>L</span><span>PTS</span></div>
+        {rows.map((row, index) => <button className="daily-table-row daily-table-button" type="button" key={row.userId} onClick={() => openClubProfile(row.userId)}><span>{index + 1}</span><strong>{row.displayName || row.username || row.email || 'Player'}</strong><span>{displayValue(row.played)}</span><span>{displayValue(row.wins)}</span><span>{displayValue(row.draws)}</span><span>{displayValue(row.losses)}</span><span>{displayValue(row.totalPoints)}</span></button>)}
       </div>
     </section>
   )
 }
 
 function ResultNotice({ result }) {
-  return (
-    <section className={`result-notice outcome-${result.code}`}>
-      <strong>{result.code}</strong>
-      <span>{result.label}: +{result.points} pts</span>
-      <small>Your pick {result.predictedScore} · Actual {result.actualScore}</small>
-    </section>
-  )
+  return <section className={`result-notice outcome-${result.code}`}><strong>{result.code}</strong><span>{result.label}: +{result.points} pts</span><small>Your pick {result.predictedScore} · Actual {result.actualScore}</small></section>
 }
 
 function UserResultStrip({ results }) {
-  return (
-    <section className="user-results panel">
-      <div>
-        <span className="eyebrow">Your results</span>
-        <p>W = spot on 3pts · D = result 1pt · L = wrong 0pts</p>
-      </div>
-      <div className="user-result-chips">
-        {results.map((result) => (
-          <span className={`user-result-chip outcome-${result.code}`} key={result.roundNumber} title={`Round ${result.roundNumber}: ${result.label}`}>
-            {result.code}
-          </span>
-        ))}
-      </div>
-    </section>
-  )
+  return <section className="user-results panel"><div><span className="eyebrow">Your results</span><p>W = spot on 3pts · D = result 1pt · L = wrong 0pts</p></div><div className="user-result-chips">{results.map((result) => <span className={`user-result-chip outcome-${result.code}`} key={result.roundNumber} title={`Round ${result.roundNumber}: ${result.label}`}>{result.code}</span>)}</div></section>
 }
 
 function TeamBlock({ side, team }) {
   const snapshot = team.snapshot || {}
-
-  return (
-    <section className="team-card compact-team-card">
-      <div className="team-heading">
-        <span>{side}</span>
-        <h3>{team.name}</h3>
-      </div>
-
-      <LeagueLine snapshot={snapshot} />
-
-      <div className="form-area compact-form-area">
-        <FormStrip label="Form" value={snapshot.form} />
-        <FormStrip label={side === 'Home' ? 'Home' : 'Away'} value={snapshot.venueForm} />
-      </div>
-    </section>
-  )
+  return <section className="team-card compact-team-card"><div className="team-heading"><span>{side}</span><h3>{team.name}</h3></div><LeagueLine snapshot={snapshot} /><div className="form-area compact-form-area"><FormStrip label="Form" value={snapshot.form} /><FormStrip label={side === 'Home' ? 'Home' : 'Away'} value={snapshot.venueForm} /></div></section>
 }
 
 function LeagueLine({ snapshot }) {
-  return (
-    <div className="league-strip compact-league-strip" aria-label="League table line before this fixture">
-      <div className="league-labels">
-        <span>Pos</span>
-        {TABLE_COLUMNS.map(([, label]) => <span key={label}>{label}</span>)}
-      </div>
-      <div className="league-values">
-        <strong>{displayValue(snapshot.position)}</strong>
-        {TABLE_COLUMNS.map(([key, label]) => (
-          <span key={label}>{displayValue(snapshot[key])}</span>
-        ))}
-      </div>
-    </div>
-  )
+  return <div className="league-strip compact-league-strip" aria-label="League table line before this fixture"><div className="league-labels"><span>Pos</span>{TABLE_COLUMNS.map(([, label]) => <span key={label}>{label}</span>)}</div><div className="league-values"><strong>{displayValue(snapshot.position)}</strong>{TABLE_COLUMNS.map(([key, label]) => <span key={label}>{displayValue(snapshot[key])}</span>)}</div></div>
 }
 
 function ResultChoices({ options, submitting, selectedOptionKey, submitPrediction }) {
-  return (
-    <div className="option-grid result-columns">
-      {RESULT_GROUPS.map(([result, label]) => {
-        const resultOptions = options.filter((option) => option.result === result).slice(0, 2)
-        return (
-          <div className={`result-column result-column-${result}`} key={result}>
-            <span className="result-column-label">{label}</span>
-            {resultOptions.map((option) => {
-              const optionKey = scoreKey(option)
-              const selected = selectedOptionKey === optionKey
-              return (
-                <button
-                  type="button"
-                  className={selected ? 'selected-choice' : ''}
-                  key={optionKey}
-                  onClick={() => submitPrediction(option)}
-                  disabled={submitting}
-                  aria-pressed={selected}
-                >
-                  <strong>{option.homeGoals}-{option.awayGoals}</strong>
-                  {selected && <small>Picked</small>}
-                </button>
-              )
-            })}
-          </div>
-        )
-      })}
-    </div>
-  )
+  return <div className="option-grid result-columns">{RESULT_GROUPS.map(([result, label]) => { const resultOptions = options.filter((option) => option.result === result).slice(0, 2); return <div className={`result-column result-column-${result}`} key={result}><span className="result-column-label">{label}</span>{resultOptions.map((option) => { const optionKey = scoreKey(option); const selected = selectedOptionKey === optionKey; return <button type="button" className={selected ? 'selected-choice' : ''} key={optionKey} onClick={() => submitPrediction(option)} disabled={submitting} aria-pressed={selected}><strong>{option.homeGoals}-{option.awayGoals}</strong>{selected && <small>Picked</small>}</button> })}</div> })}</div>
 }
 
 function FormStrip({ label, value }) {
   const results = String(value || '').replace(/[^WDL]/g, '').split('').slice(-5)
-
-  return (
-    <div className="form-strip-wrap">
-      <span className="form-label">{label}</span>
-      {results.length ? (
-        <div className="form-strip">
-          {results.map((result, index) => (
-            <span className={`form-chip ${resultClass(result)}`} key={`${result}-${index}`}>
-              {result}
-            </span>
-          ))}
-        </div>
-      ) : (
-        <span className="form-empty">-</span>
-      )}
-    </div>
-  )
+  return <div className="form-strip-wrap"><span className="form-label">{label}</span>{results.length ? <div className="form-strip">{results.map((result, index) => <span className={`form-chip ${resultClass(result)}`} key={`${result}-${index}`}>{result}</span>)}</div> : <span className="form-empty">-</span>}</div>
 }
 
 function leagueValue(league) {
@@ -766,20 +491,11 @@ function leagueNameForCompetition(competition, displayName = '') {
 }
 
 function cleanUsername(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '')
-    .slice(0, 20)
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20)
 }
 
 function clubInitials(value) {
-  return String(value || 'FC')
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase())
-    .join('') || 'FC'
+  return String(value || 'FC').split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]?.toUpperCase()).join('') || 'FC'
 }
 
 function displayValue(value) {
@@ -794,12 +510,7 @@ function formatFixtureDate(value) {
   if (!value) return 'Fixture date unavailable'
   const date = new Date(`${value}T12:00:00`)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('en-GB', {
-    weekday: 'short',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(date)
+  return new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }).format(date)
 }
 
 function resultClass(result) {
