@@ -2,16 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabaseClient'
 import './dailyGame.css'
 
-const RESULT_LABELS = {
-  H: 'Home win',
-  D: 'Draw',
-  A: 'Away win',
-}
-
 const RESULT_GROUPS = [
-  ['H', 'Home'],
+  ['H', 'Home win'],
   ['D', 'Draw'],
-  ['A', 'Away'],
+  ['A', 'Away win'],
 ]
 
 const TABLE_COLUMNS = [
@@ -30,6 +24,7 @@ function App() {
   const [game, setGame] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [selectedOptionKey, setSelectedOptionKey] = useState('')
   const [error, setError] = useState('')
   const [authMode, setAuthMode] = useState('sign-in')
   const [authForm, setAuthForm] = useState({ email: '', password: '' })
@@ -84,6 +79,8 @@ function App() {
   async function submitPrediction(option) {
     if (!session?.access_token || !game?.currentRound) return
 
+    const optionKey = scoreKey(option)
+    setSelectedOptionKey(optionKey)
     setSubmitting(true)
     setError('')
 
@@ -107,6 +104,7 @@ function App() {
         throw new Error(data.error || 'Could not submit prediction')
       }
 
+      setSelectedOptionKey('')
       await loadGame()
     } catch (err) {
       setError(err.message)
@@ -210,6 +208,8 @@ function App() {
                   <strong>{game.season.displayName}</strong>
                 </div>
 
+                <div className="fixture-date">{formatFixtureDate(game.currentRound.fixtureDate)}</div>
+
                 <div className="match-title compact-match-title">
                   <h2>{game.currentRound.home.name}</h2>
                   <span>v</span>
@@ -221,7 +221,12 @@ function App() {
                   <TeamBlock side="Away" team={game.currentRound.away} />
                 </div>
 
-                <ResultChoices options={game.currentRound.options} submitting={submitting} submitPrediction={submitPrediction} />
+                <ResultChoices
+                  options={game.currentRound.options}
+                  submitting={submitting}
+                  selectedOptionKey={selectedOptionKey}
+                  submitPrediction={submitPrediction}
+                />
               </article>
 
               <aside className="panel score-panel compact-score-panel">
@@ -297,24 +302,31 @@ function LeagueLine({ snapshot }) {
   )
 }
 
-function ResultChoices({ options, submitting, submitPrediction }) {
+function ResultChoices({ options, submitting, selectedOptionKey, submitPrediction }) {
   return (
     <div className="option-grid result-columns">
       {RESULT_GROUPS.map(([result, label]) => {
         const resultOptions = options.filter((option) => option.result === result).slice(0, 2)
         return (
-          <div className="result-column" key={result}>
+          <div className={`result-column result-column-${result}`} key={result}>
             <span className="result-column-label">{label}</span>
-            {resultOptions.map((option) => (
-              <button
-                type="button"
-                key={`${option.homeGoals}-${option.awayGoals}`}
-                onClick={() => submitPrediction(option)}
-                disabled={submitting}
-              >
-                <strong>{option.homeGoals}-{option.awayGoals}</strong>
-              </button>
-            ))}
+            {resultOptions.map((option) => {
+              const optionKey = scoreKey(option)
+              const selected = selectedOptionKey === optionKey
+              return (
+                <button
+                  type="button"
+                  className={selected ? 'selected-choice' : ''}
+                  key={optionKey}
+                  onClick={() => submitPrediction(option)}
+                  disabled={submitting}
+                  aria-pressed={selected}
+                >
+                  <strong>{option.homeGoals}-{option.awayGoals}</strong>
+                  {selected && <small>Picked</small>}
+                </button>
+              )
+            })}
           </div>
         )
       })}
@@ -345,6 +357,22 @@ function FormStrip({ label, value }) {
 
 function displayValue(value) {
   return value === null || value === undefined || value === '' ? '-' : value
+}
+
+function scoreKey(option) {
+  return `${option.homeGoals}-${option.awayGoals}`
+}
+
+function formatFixtureDate(value) {
+  if (!value) return 'Fixture date unavailable'
+  const date = new Date(`${value}T12:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
 }
 
 function resultClass(result) {
