@@ -7,12 +7,27 @@ export function getSupabase() {
   return createClient(url, key)
 }
 
+export function cleanUsername(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 20)
+}
+
 export async function getUser(event, supabase) {
   const token = event.headers.authorization?.replace('Bearer ', '')
   if (!token) throw new Error('Missing auth token')
   const { data, error } = await supabase.auth.getUser(token)
   if (error || !data.user) throw new Error('Invalid auth token')
-  await supabase.from('user_profiles').upsert({ user_id: data.user.id, email: data.user.email }, { onConflict: 'user_id' })
+
+  const username = cleanUsername(data.user.user_metadata?.username)
+  await supabase.from('user_profiles').upsert({
+    user_id: data.user.id,
+    email: data.user.email,
+    ...(username ? { username } : {}),
+  }, { onConflict: 'user_id' })
+
   return data.user
 }
 
