@@ -22,13 +22,17 @@ const TABLE_COLUMNS = [
 function App() {
   const [session, setSession] = useState(null)
   const [game, setGame] = useState(null)
+  const [clubProfile, setClubProfile] = useState(null)
+  const [clubForm, setClubForm] = useState({ clubName: '', badgeUrl: '' })
   const [availableLeagues, setAvailableLeagues] = useState([])
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [selectedOptionKey, setSelectedOptionKey] = useState('')
   const [lastResult, setLastResult] = useState(null)
   const [error, setError] = useState('')
   const [authMode, setAuthMode] = useState('sign-in')
+  const [view, setView] = useState('game')
   const [authForm, setAuthForm] = useState({ email: '', username: '', country: '', competition: '', leagueName: '', password: '' })
 
   useEffect(() => {
@@ -49,18 +53,21 @@ function App() {
   useEffect(() => {
     if (session) {
       loadGame(session)
+      loadClubProfile(session)
     } else {
       setGame(null)
+      setClubProfile(null)
+      setView('game')
     }
   }, [session])
 
   async function loadAvailableLeagues() {
     const { data, error: leaguesError } = await supabase
       .from('seasons')
-      .select('country, competition, league_name')
+      .select('country, competition, display_name')
       .eq('is_complete', true)
       .order('country')
-      .order('league_name')
+      .order('competition')
 
     if (leaguesError) {
       setError(leaguesError.message)
@@ -73,7 +80,7 @@ function App() {
     for (const season of data || []) {
       const country = season.country || 'England'
       const competition = season.competition || 'E0'
-      const leagueName = season.league_name || competition
+      const leagueName = leagueNameForCompetition(competition, season.display_name)
       const key = `${country}:${competition}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -106,10 +113,17 @@ function App() {
           Authorization: `Bearer ${activeSession.access_token}`,
         },
       })
-      const data = await res.json()
+      const text = await res.text()
+      let data = {}
+
+      try {
+        data = text ? JSON.parse(text) : {}
+      } catch {
+        data = { error: text || 'Could not load today\'s game' }
+      }
 
       if (!res.ok) {
-        throw new Error(data.error || 'Could not load today\'s game')
+        throw new Error(data.error || data.message || 'Could not load today\'s game')
       }
 
       setGame(data)
@@ -117,6 +131,92 @@ function App() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadClubProfile(activeSession = session) {
+    if (!activeSession?.access_token) return
+
+    setProfileLoading(true)
+
+    try {
+      const res = await fetch('/.netlify/functions/getClubProfile', {
+        headers: {
+          Authorization: `Bearer ${activeSession.access_token}`,
+        },
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not load club profile')
+      }
+
+      setClubProfile(data)
+      setClubForm({
+        clubName: data.profile?.clubName || '',
+        badgeUrl: data.profile?.badgeUrl || '',
+      })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
+  async function saveClubProfile(nextValues = clubForm) {
+    if (!session?.access_token) return
+
+    setProfileLoading(true)
+    setError('')
+
+    try {
+      const res = await fetch('/.netlify/functions/updateClubProfile', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(nextValues),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not save club profile')
+      }
+
+      await loadClubProfile()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
+  async function uploadBadge(event) {
+    const file = event.target.files?.[0]
+    if (!file || !session?.user?.id) return
+
+    setProfileLoading(true)
+    setError('')
+
+    try {
+      const safeName = file.name.toLowerCase().replace(/[^a-z0-9._-]/g, '-')
+      const path = `${session.user.id}/${Date.now()}-${safeName}`
+      const upload = await supabase.storage
+        .from('club-badges')
+        .upload(path, file, { upsert: true, contentType: file.type })
+
+      if (upload.error) throw upload.error
+
+      const { data } = supabase.storage.from('club-badges').getPublicUrl(path)
+      const nextForm = { ...clubForm, badgeUrl: data.publicUrl, badgePath: path }
+      setClubForm({ clubName: nextForm.clubName, badgeUrl: nextForm.badgeUrl })
+      await saveClubProfile(nextForm)
+    } catch (err) {
+      setError(`Badge upload failed: ${err.message}`)
+    } finally {
+      setProfileLoading(false)
+      event.target.value = ''
     }
   }
 
@@ -152,6 +252,7 @@ function App() {
       setLastResult(data.result)
       setSelectedOptionKey('')
       await loadGame()
+      await loadClubProfile()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -216,7 +317,7 @@ function App() {
       </section>
 
       {error && <p className="alert">{error}</p>}
-      {lastResult && <ResultNotice result={lastResult} />}
+      {lastResult && view === 'game' && <ResultNotice result={lastResult} />}
 
       {!session && (
         <section className="panel auth-panel">
@@ -302,67 +403,204 @@ function App() {
 
       {session && (
         <>
-          <nav className="topbar compact-topbar">
-            <span>{session.user.user_metadata?.username || session.user.email}</span>
-            <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
+          <nav className="topbar compact-topbar app-nav">
+            <span>{clubProfile?.profile?.clubName || session.user.user_metadata?.username || session.user.email}</span>
+            <div className="topbar-actions">
+              <button type="button" onClick={() => setView('game')}>Game</button>
+              <button type="button" onClick={() => setView('profile')}>Club</button>
+              <button type="button" onClick={() => supabase.auth.signOut()}>Sign out</button>
+            </div>
           </nav>
 
-          {game?.country && <p className="country-badge">League: {game.country}{game.leagueName ? ` - ${game.leagueName}` : ''}{game.tier?.name ? ` · ${game.tier.name}` : ''}</p>}
-
-          {game?.resultHistory?.length > 0 && <UserResultStrip results={game.resultHistory} />}
-
-          {loading && <section className="panel">Loading today&apos;s game...</section>}
-
-          {!loading && game?.currentRound && (
-            <section className="game-layout">
-              <article className="panel fixture-panel compact-fixture">
-                <div className="round-meta">
-                  <span>Round {game.currentRound.roundNumber}/{game.totalRounds}</span>
-                  <strong>{game.season.displayName}</strong>
-                </div>
-
-                <div className="fixture-date">{formatFixtureDate(game.currentRound.fixtureDate)}</div>
-
-                <div className="match-title compact-match-title">
-                  <h2>{game.currentRound.home.name}</h2>
-                  <span>v</span>
-                  <h2>{game.currentRound.away.name}</h2>
-                </div>
-
-                <div className="scoreboard compact-scoreboard">
-                  <TeamBlock side="Home" team={game.currentRound.home} />
-                  <TeamBlock side="Away" team={game.currentRound.away} />
-                </div>
-
-                <ResultChoices
-                  options={game.currentRound.options}
-                  submitting={submitting}
-                  selectedOptionKey={selectedOptionKey}
-                  submitPrediction={submitPrediction}
-                />
-              </article>
-
-              <aside className="panel score-panel compact-score-panel">
-                <p className="eyebrow">Your score</p>
-                <h2>{game.userScore.totalPoints} pts</h2>
-                <p>{game.userScore.correctScores} exact · {game.userScore.correctResults} results</p>
-                <p className="muted">W = 3pts · D = 1pt · L = 0pts</p>
-              </aside>
-            </section>
+          {view === 'profile' && (
+            <ClubProfilePage
+              profileData={clubProfile}
+              clubForm={clubForm}
+              setClubForm={setClubForm}
+              profileLoading={profileLoading}
+              saveClubProfile={saveClubProfile}
+              uploadBadge={uploadBadge}
+              refresh={() => loadClubProfile()}
+            />
           )}
 
-          {!loading && game?.completed && (
-            <section className="panel">
-              <p className="eyebrow">Season complete</p>
-              <h2>You scored {game.userScore.totalPoints} points.</h2>
-              <p>Come back tomorrow for a new randomly selected season.</p>
-            </section>
-          )}
+          {view === 'game' && (
+            <>
+              {game?.country && <p className="country-badge">League: {game.country}{game.leagueName ? ` - ${game.leagueName}` : ''}{game.tier?.name ? ` · ${game.tier.name}` : ''}</p>}
 
-          {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} game={game} />}
+              {game?.resultHistory?.length > 0 && <UserResultStrip results={game.resultHistory} />}
+
+              {loading && <section className="panel">Loading today&apos;s game...</section>}
+
+              {!loading && game?.currentRound && (
+                <section className="game-layout">
+                  <article className="panel fixture-panel compact-fixture">
+                    <div className="round-meta">
+                      <span>Round {game.currentRound.roundNumber}/{game.totalRounds}</span>
+                      <strong>{game.season.displayName}</strong>
+                    </div>
+
+                    <div className="fixture-date">{formatFixtureDate(game.currentRound.fixtureDate)}</div>
+
+                    <div className="match-title compact-match-title">
+                      <h2>{game.currentRound.home.name}</h2>
+                      <span>v</span>
+                      <h2>{game.currentRound.away.name}</h2>
+                    </div>
+
+                    <div className="scoreboard compact-scoreboard">
+                      <TeamBlock side="Home" team={game.currentRound.home} />
+                      <TeamBlock side="Away" team={game.currentRound.away} />
+                    </div>
+
+                    <ResultChoices
+                      options={game.currentRound.options}
+                      submitting={submitting}
+                      selectedOptionKey={selectedOptionKey}
+                      submitPrediction={submitPrediction}
+                    />
+                  </article>
+
+                  <aside className="panel score-panel compact-score-panel">
+                    <p className="eyebrow">Your score</p>
+                    <h2>{game.userScore.totalPoints} pts</h2>
+                    <p>{game.userScore.correctScores} exact · {game.userScore.correctResults} results</p>
+                    <p className="muted">W = 3pts · D = 1pt · L = 0pts</p>
+                  </aside>
+                </section>
+              )}
+
+              {!loading && game?.completed && (
+                <section className="panel">
+                  <p className="eyebrow">Season complete</p>
+                  <h2>You scored {game.userScore.totalPoints} points.</h2>
+                  <p>Come back tomorrow for a new randomly selected season.</p>
+                </section>
+              )}
+
+              {leaderboard.length > 0 && <DailyLeaderboard rows={leaderboard} game={game} />}
+            </>
+          )}
         </>
       )}
     </main>
+  )
+}
+
+function ClubProfilePage({ profileData, clubForm, setClubForm, profileLoading, saveClubProfile, uploadBadge, refresh }) {
+  const profile = profileData?.profile || {}
+  const stats = profileData?.stats || {}
+  const seasons = profileData?.seasons || []
+
+  return (
+    <section className="profile-stack">
+      <article className="panel club-profile-hero">
+        <div className="club-badge">
+          {clubForm.badgeUrl ? <img src={clubForm.badgeUrl} alt="Club badge" /> : <span>{clubInitials(clubForm.clubName || profile.clubName)}</span>}
+        </div>
+        <div>
+          <p className="eyebrow">Club profile</p>
+          <h2>{profile.clubName || 'My Club'}</h2>
+          <p className="muted">{profile.country} · {profile.leagueName} · {profile.tierName}</p>
+        </div>
+      </article>
+
+      <article className="panel club-editor">
+        <label>
+          Club name
+          <input
+            type="text"
+            maxLength="40"
+            value={clubForm.clubName}
+            onChange={(event) => setClubForm({ ...clubForm, clubName: event.target.value })}
+            placeholder="Enter club name"
+          />
+        </label>
+        <label>
+          Club badge
+          <input type="file" accept="image/*" onChange={uploadBadge} disabled={profileLoading} />
+        </label>
+        <button type="button" onClick={() => saveClubProfile()} disabled={profileLoading}>
+          {profileLoading ? 'Saving...' : 'Save club'}
+        </button>
+        <button type="button" className="link-button" onClick={refresh} disabled={profileLoading}>Refresh stats</button>
+      </article>
+
+      <article className="panel">
+        <p className="eyebrow">All-time stats</p>
+        <div className="stats-grid">
+          <StatCard label="Seasons" value={stats.seasonsPlayed} />
+          <StatCard label="Played" value={stats.totalPlayed} />
+          <StatCard label="Points" value={stats.totalPoints} />
+          <StatCard label="Wins" value={stats.totalWins} />
+          <StatCard label="Draws" value={stats.totalDraws} />
+          <StatCard label="Defeats" value={stats.totalLosses} />
+          <StatCard label="Win %" value={`${displayValue(stats.winPercentage)}%`} />
+          <StatCard label="Draw %" value={`${displayValue(stats.drawPercentage)}%`} />
+          <StatCard label="Loss %" value={`${displayValue(stats.lossPercentage)}%`} />
+          <StatCard label="Best W streak" value={stats.longestWinningStreak} />
+          <StatCard label="Best D streak" value={stats.longestDrawStreak} />
+          <StatCard label="Worst L streak" value={stats.longestLosingStreak} />
+        </div>
+      </article>
+
+      <article className="panel best-worst-grid">
+        <SeasonSummary title="Best season" season={stats.bestSeason} />
+        <SeasonSummary title="Worst season" season={stats.worstSeason} />
+      </article>
+
+      <article className="panel daily-table-panel">
+        <p className="eyebrow">Season history</p>
+        <div className="daily-table">
+          <div className="daily-table-row profile-season-row daily-table-head">
+            <span>Season</span>
+            <span>P</span>
+            <span>W</span>
+            <span>D</span>
+            <span>L</span>
+            <span>PTS</span>
+            <span>W%</span>
+          </div>
+          {seasons.length === 0 && <p className="muted">No completed picks yet.</p>}
+          {seasons.map((season) => (
+            <div className="daily-table-row profile-season-row" key={season.id}>
+              <strong>{season.label}</strong>
+              <span>{displayValue(season.played)}</span>
+              <span>{displayValue(season.wins)}</span>
+              <span>{displayValue(season.draws)}</span>
+              <span>{displayValue(season.losses)}</span>
+              <span>{displayValue(season.points)}</span>
+              <span>{displayValue(season.winPercentage)}%</span>
+            </div>
+          ))}
+        </div>
+      </article>
+    </section>
+  )
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div className="stat-card">
+      <span>{label}</span>
+      <strong>{displayValue(value)}</strong>
+    </div>
+  )
+}
+
+function SeasonSummary({ title, season }) {
+  return (
+    <div className="season-summary">
+      <p className="eyebrow">{title}</p>
+      {season ? (
+        <>
+          <h3>{season.label}</h3>
+          <p>{season.points} pts · {season.wins}W {season.draws}D {season.losses}L</p>
+        </>
+      ) : (
+        <p className="muted">No season yet.</p>
+      )}
+    </div>
   )
 }
 
@@ -522,12 +760,26 @@ function leagueValue(league) {
   return league.country && league.competition ? `${league.country}:${league.competition}` : ''
 }
 
+function leagueNameForCompetition(competition, displayName = '') {
+  if (competition === 'E0') return 'Premier League'
+  return String(displayName || competition).replace(/\s+\d{4}\/\d{4}$/, '') || competition
+}
+
 function cleanUsername(value) {
   return String(value || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, '')
     .slice(0, 20)
+}
+
+function clubInitials(value) {
+  return String(value || 'FC')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join('') || 'FC'
 }
 
 function displayValue(value) {
