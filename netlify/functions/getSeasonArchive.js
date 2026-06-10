@@ -32,35 +32,78 @@ function seasonLabel(game) {
   return game?.seasons?.display_name || game?.league_name || game?.game_date || 'Season'
 }
 
+function predictionCode(row) {
+  if (row.exact_score) return 'W'
+  if (row.correct_result) return 'D'
+  return 'L'
+}
+
+function scoreText(home, away) {
+  if (home === null || home === undefined || away === null || away === undefined) return '-'
+  return `${home}-${away}`
+}
+
+async function loadTeamFixtures(supabase, dailyGameId, userId) {
+  if (!dailyGameId || !userId) return []
+
+  const fixturesResult = await supabase
+    .from('daily_game_fixtures')
+    .select('id, round_number, fixtures(match_date, home_team, away_team, full_time_home_goals, full_time_away_goals)')
+    .eq('daily_game_id', dailyGameId)
+    .order('round_number')
+
+  if (fixturesResult.error) throw fixturesResult.error
+
+  const fixtureIds = (fixturesResult.data || []).map((row) => row.id)
+  if (!fixtureIds.length) return []
+
+  const predictionsResult = await supabase
+    .from('predictions')
+    .select('*')
+    .eq('user_id', userId)
+    .in('daily_game_fixture_id', fixtureIds)
+
+  if (predictionsResult.error) throw predictionsResult.error
+
+  const predictions = new Map((predictionsResult.data || []).map((row) => [row.daily_game_fixture_id, row]))
+
+  return (fixturesResult.data || []).map((round) => {
+    const prediction = predictions.get(round.id)
+    const fixture = round.fixtures || {}
+    return {
+      roundNumber: Number(round.round_number || 0),
+      fixtureDate: fixture.match_date,
+      homeTeam: fixture.home_team,
+      awayTeam: fixture.away_team,
+      actualScore: scoreText(fixture.full_time_home_goals, fixture.full_time_away_goals),
+      predictedScore: prediction ? scoreText(prediction.predicted_home_goals, prediction.predicted_away_goals) : '-',
+      points: Number(prediction?.points || 0),
+      resultCode: prediction ? predictionCode(prediction) : '-',
+      isAuto: prediction?.is_auto === true,
+    }
+  }).filter((round) => round.predictedScore !== '-')
+}
+
 export async function handler(event) {
   try {
     const supabase = getSupabase()
-    const user = await getUser(event, supabase)
+    await getUser(event, supabase)
 
-    const profileResult = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('user_id', user.id)
-      .maybeSingle()
+    const selectedGameId = event.queryStringParameters?.dailyGameId || ''
+    const selectedUserId = event.queryStringParameters?.userId || ''
 
-    if (profileResult.error) throw profileResult.error
-    if (!profileResult.data) return json(404, { error: 'Profile not found' })
-
-    const profile = profileResult.data
     const gamesResult = await supabase
       .from('daily_games')
       .select('id, game_date, country, competition, league_name, winner_user_id, closed_at, seasons(display_name, code)')
-      .eq('country', profile.country)
-      .eq('competition', profile.competition)
       .eq('status', 'closed')
       .order('game_date', { ascending: false })
-      .limit(30)
+      .limit(60)
 
     if (gamesResult.error) throw gamesResult.error
 
     const games = gamesResult.data || []
     const gameIds = games.map((game) => game.id)
-    if (!gameIds.length) return json(200, { seasons: [] })
+    if (!gameIds.length) return json(200, { leagues: [], seasons: [], teamFixtures: [] })
 
     const resultsResult = await supabase
       .from('daily_results')
@@ -83,6 +126,21 @@ export async function handler(event) {
     for (const row of resultsResult.data || []) {
       if (!resultsByGame.has(row.daily_game_id)) resultsByGame.set(row.daily_game_id, [])
       resultsByGame.get(row.daily_game_id).push(row)
+    }
+
+    const leaguesMap = new Map()
+    for (const game of games) {
+      const key = `${game.country}:${game.competition}`
+      if (!leaguesMap.has(key)) {
+        leaguesMap.set(key, {
+          key,
+          country: game.country,
+          competition: game.competition,
+          leagueName: game.league_name,
+          seasonCount: 0,
+        })
+      }
+      leaguesMap.get(key).seasonCount += 1
     }
 
     const seasons = games.map((game) => {
@@ -124,15 +182,23 @@ export async function handler(event) {
         gameDate: game.game_date,
         country: game.country,
         competition: game.competition,
+        leagueKey: `${game.country}:${game.competition}`,
         leagueName: game.league_name,
         seasonLabel: seasonLabel(game),
         closedAt: game.closed_at,
         tiers,
-        myResult: rows.find((row) => row.user_id === user.id) || null,
       }
     })
 
-    return json(200, { seasons })
+    const teamFixtures = selectedGameId && selectedUserId
+      ? await loadTeamFixtures(supabase, selectedGameId, selectedUserId)
+      : []
+
+    return json(200, {
+      leagues: [...leaguesMap.values()].sort((a, b) => a.country.localeCompare(b.country) || a.leagueName.localeCompare(b.leagueName)),
+      seasons,
+      teamFixtures,
+    })
   } catch (error) {
     return json(500, { error: error.message || 'Could not load previous seasons archive' })
   }
