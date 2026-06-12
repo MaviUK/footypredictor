@@ -1,0 +1,348 @@
+:root {
+  --clean-bg: #f5f7f3;
+  --clean-surface: #ffffff;
+  --clean-soft: #eef3ec;
+  --clean-text: #152016;
+  --clean-muted: #667367;
+  --clean-border: #dfe8de;
+  --clean-accent: #2fce68;
+  --clean-accent-dark: #132319;
+  --clean-danger: #ef476f;
+  --clean-draw: #8e98a3;
+}
+
+body {
+  background: var(--clean-bg) !important;
+  color: var(--clean-text) !important;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+
+#root {
+  border-inline: 0 !important;
+  background: var(--clean-bg) !important;
+}
+
+.app-shell {
+  width: min(1040px, calc(100% - 28px)) !important;
+  padding: 18px 0 40px !important;
+}
+
+.hero,
+.panel {
+  background: var(--clean-surface) !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 24px !important;
+  box-shadow: 0 10px 30px rgba(15, 35, 20, 0.06) !important;
+  padding: 18px !important;
+}
+
+.hero h1,
+.panel h1,
+.panel h2,
+.panel h3,
+.match-title h2,
+.club-profile-hero h2 {
+  color: var(--clean-text) !important;
+  letter-spacing: -0.04em !important;
+}
+
+.eyebrow,
+.fixture-date,
+.form-label,
+.stat-card span,
+.explore-tier-title small,
+.muted,
+.country-badge,
+.hero p:last-child,
+.user-results p {
+  color: var(--clean-muted) !important;
+}
+
+.eyebrow {
+  letter-spacing: 0.16em !important;
+  font-size: 0.68rem !important;
+}
+
+button,
+.topbar-actions button,
+.option-grid button {
+  background: var(--clean-accent) !important;
+  color: #07120a !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  font-weight: 850 !important;
+}
+
+button:hover,
+.daily-table-button:hover,
+.explore-club-card:hover {
+  filter: brightness(0.98);
+}
+
+button:disabled {
+  background: #d8e3d8 !important;
+  color: #7b887b !important;
+}
+
+.link-button {
+  background: transparent !important;
+  color: var(--clean-accent-dark) !important;
+}
+
+input,
+select {
+  background: #ffffff !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 3px solid rgba(47, 206, 104, 0.22) !important;
+  outline-offset: 2px !important;
+}
+
+.topbar {
+  gap: 10px !important;
+  margin-bottom: 14px !important;
+}
+
+.club-name-button {
+  background: var(--clean-surface) !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+}
+
+.topbar-actions {
+  gap: 8px !important;
+}
+
+.result-notice {
+  border-radius: 18px !important;
+  box-shadow: none !important;
+  margin: 10px 0 12px !important;
+  padding: 12px 14px !important;
+}
+
+.result-notice strong {
+  background: rgba(255, 255, 255, 0.28) !important;
+}
+
+.outcome-W,
+.user-result-chip.outcome-W,
+.form-chip.win {
+  background: var(--clean-accent) !important;
+}
+
+.outcome-D,
+.user-result-chip.outcome-D,
+.form-chip.draw {
+  background: var(--clean-draw) !important;
+}
+
+.outcome-L,
+.user-result-chip.outcome-L,
+.form-chip.loss {
+  background: var(--clean-danger) !important;
+}
+
+.game-layout {
+  gap: 14px !important;
+}
+
+.round-meta,
+.round-meta strong {
+  color: var(--clean-text) !important;
+}
+
+.fixture-date {
+  border-top: 1px solid var(--clean-border);
+  padding-top: 14px;
+  margin-top: 4px !important;
+}
+
+.match-title span {
+  background: var(--clean-soft) !important;
+  color: var(--clean-text) !important;
+}
+
+.scoreboard,
+.option-grid,
+.stats-grid,
+.best-worst-grid,
+.explore-club-grid {
+  gap: 12px !important;
+}
+
+.team-card {
+  background: #fbfdfb !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 20px !important;
+}
+
+.team-heading h3,
+.team-heading span,
+.league-values strong,
+.league-values span,
+.daily-table-row strong,
+.daily-table-row span,
+.profile-history-row strong,
+.profile-history-row span,
+.explore-club-card strong,
+.explore-club-card small {
+  color: var(--clean-text) !important;
+}
+
+.team-heading span,
+.form-label,
+.league-labels span {
+  color: var(--clean-muted) !important;
+}
+
+.league-strip,
+.compact-league-strip {
+  background: #ffffff !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 14px !important;
+}
+
+.league-labels span {
+  background: var(--clean-soft) !important;
+}
+
+.league-values strong {
+  color: #15803d !important;
+}
+
+.form-chip {
+  box-shadow: none !important;
+  border-radius: 10px !important;
+}
+
+.option-grid button,
+.result-column button {
+  background: #ffffff !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 16px !important;
+}
+
+.option-grid button.selected-choice,
+.result-column button.selected-choice {
+  background: var(--clean-accent) !important;
+  outline: 0 !important;
+  box-shadow: 0 0 0 4px rgba(47, 206, 104, 0.18) !important;
+  transform: none !important;
+}
+
+.score-panel h2 {
+  color: var(--clean-text) !important;
+}
+
+.daily-table-row,
+.profile-history-row,
+.explore-club-card {
+  background: #ffffff !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 14px !important;
+}
+
+.daily-table-head,
+.profile-history-head {
+  background: var(--clean-soft) !important;
+}
+
+.daily-table-button {
+  background: #ffffff !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+}
+
+.daily-table-button span,
+.daily-table-button strong {
+  color: var(--clean-text) !important;
+}
+
+.alert {
+  background: #fff0f3 !important;
+  color: #9f1239 !important;
+  border: 1px solid #ffd0dc !important;
+  box-shadow: none !important;
+}
+
+.user-results {
+  background: var(--clean-surface) !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 24px !important;
+  padding: 14px !important;
+}
+
+.user-result-chip {
+  border-radius: 999px !important;
+}
+
+.club-badge,
+.mini-badge {
+  background: var(--clean-soft) !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+}
+
+.stat-card,
+.season-summary {
+  background: #ffffff !important;
+  color: var(--clean-text) !important;
+  border: 1px solid var(--clean-border) !important;
+  border-radius: 18px !important;
+}
+
+.stat-card strong,
+.season-summary h3 {
+  color: var(--clean-text) !important;
+}
+
+.explore-tier {
+  border-top: 1px solid var(--clean-border) !important;
+}
+
+@media (max-width: 520px) {
+  .app-shell {
+    width: min(100% - 16px, 1040px) !important;
+    padding-top: 10px !important;
+  }
+
+  .panel,
+  .hero {
+    border-radius: 22px !important;
+    padding: 12px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .compact-hero {
+    display: none !important;
+  }
+
+  .topbar-actions button,
+  .club-name-button {
+    padding: 0.62rem 0.78rem !important;
+  }
+
+  .scoreboard {
+    gap: 8px !important;
+  }
+
+  .team-card {
+    border-radius: 18px !important;
+    padding: 10px !important;
+  }
+
+  .result-column button {
+    min-height: 42px !important;
+  }
+}
