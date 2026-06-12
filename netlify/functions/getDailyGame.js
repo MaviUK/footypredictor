@@ -223,10 +223,12 @@ async function ensureDailyGame(supabase, gameDate, league) {
     .eq('game_date', gameDate)
     .eq('country', league.country)
     .eq('competition', league.competition)
-    .maybeSingle())
-  if (existing.data) {
-    await ensureDailyGameFixtures(supabase, existing.data)
-    return existing.data
+    .order('created_at', { ascending: false })
+    .limit(1))
+  const existingGame = existing.data?.[0]
+  if (existingGame) {
+    await ensureDailyGameFixtures(supabase, existingGame)
+    return existingGame
   }
   const seasons = await checked('season lookup', supabase
     .from('seasons')
