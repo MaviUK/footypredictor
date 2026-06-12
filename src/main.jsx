@@ -9,6 +9,7 @@ import './seasonLabelFix.js'
 import './profileSeasonLabels.js'
 import './profileSeasonOpen.js'
 import './resultNoticePosition.js'
+import './unarchivedSeasonFallback.js'
 import App from './App.jsx'
 
 createRoot(document.getElementById('root')).render(
