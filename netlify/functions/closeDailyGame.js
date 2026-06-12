@@ -1,7 +1,8 @@
 import { getSupabase, londonDate, shuffle, scorePoints, json } from './_gameHelpers.js'
+import { previousGameCycle } from './_testCycle.js'
 
 export const config = {
-  schedule: '5 0 * * *',
+  schedule: '*/15 * * * *',
 }
 
 function previousLondonDate() {
@@ -130,7 +131,7 @@ async function closeOneDailyGame(supabase, dailyGame) {
       const key = predictionKey(profile.user_id, round.id)
       if (predictionKeys.has(key)) continue
 
-      const option = shuffle(round.options || [], `cutoff:${dailyGame.game_date}:${profile.user_id}:${round.id}`)[0]
+      const option = shuffle(round.options || [], `cutoff:${dailyGame.cycle_key || dailyGame.game_date}:${profile.user_id}:${round.id}`)[0]
       if (!option) continue
 
       autoPredictions.push({
@@ -221,6 +222,7 @@ async function closeOneDailyGame(supabase, dailyGame) {
 
   return {
     dailyGameId: dailyGame.id,
+    cycleKey: dailyGame.cycle_key || 'daily',
     country: dailyGame.country,
     competition: dailyGame.competition,
     leagueName: dailyGame.league_name,
@@ -237,9 +239,12 @@ export async function handler(event) {
 
     const supabase = getSupabase()
     const today = londonDate()
-    const gameDate = event.queryStringParameters?.date || previousLondonDate()
+    const previousCycle = previousGameCycle(today)
+    const gameDate = event.queryStringParameters?.date || (previousCycle.isTestMode ? previousCycle.gameDate : previousLondonDate())
+    const cycleKey = event.queryStringParameters?.cycleKey || (previousCycle.isTestMode ? previousCycle.cycleKey : 'daily')
+    const allowToday = event.queryStringParameters?.allowToday === 'true' || previousCycle.isTestMode
 
-    if (gameDate >= today && event.queryStringParameters?.allowToday !== 'true') {
+    if (gameDate >= today && !allowToday) {
       return json(409, { error: 'Refusing to close today before the day has ended.' })
     }
 
@@ -247,6 +252,7 @@ export async function handler(event) {
       .from('daily_games')
       .select('*')
       .eq('game_date', gameDate)
+      .eq('cycle_key', cycleKey)
       .neq('status', 'closed')
 
     if (event.queryStringParameters?.country) query = query.eq('country', event.queryStringParameters.country)
@@ -256,7 +262,7 @@ export async function handler(event) {
     const dailyGames = dailyGamesResult.data || []
 
     if (!dailyGames.length) {
-      return json(200, { gameDate, message: 'No open daily games to close', closedGames: [] })
+      return json(200, { gameDate, cycleKey, message: 'No open daily games to close', closedGames: [] })
     }
 
     const closedGames = []
@@ -266,6 +272,8 @@ export async function handler(event) {
 
     return json(200, {
       gameDate,
+      cycleKey,
+      testMode: previousCycle.isTestMode,
       closedGames,
       autoPredictions: closedGames.reduce((sum, game) => sum + Number(game.autoPredictions || 0), 0),
       players: closedGames.reduce((sum, game) => sum + Number(game.players || 0), 0),
