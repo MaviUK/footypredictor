@@ -1,5 +1,4 @@
 import { getSupabase, getUser, londonDate, shuffle, makeOptions, scorePoints, json } from './_gameHelpers.js'
-import { currentGameCycle } from './_testCycle.js'
 
 const DEFAULT_LEAGUE = { country: 'England', competition: 'E0', leagueName: 'Premier League' }
 const MAX_DAILY_ROUNDS = 46
@@ -62,26 +61,15 @@ function applyFixtureToTable(table, fixture) {
   const ag = Number(fixture.full_time_away_goals)
   const hr = hg > ag ? 'W' : hg === ag ? 'D' : 'L'
   const ar = ag > hg ? 'W' : hg === ag ? 'D' : 'L'
-  home.played += 1
-  away.played += 1
-  home.goalsFor += hg
-  home.goalsAgainst += ag
-  away.goalsFor += ag
-  away.goalsAgainst += hg
+  home.played += 1; away.played += 1
+  home.goalsFor += hg; home.goalsAgainst += ag
+  away.goalsFor += ag; away.goalsAgainst += hg
   home.points += hr === 'W' ? 3 : hr === 'D' ? 1 : 0
   away.points += ar === 'W' ? 3 : ar === 'D' ? 1 : 0
-  home.won += hr === 'W' ? 1 : 0
-  home.drawn += hr === 'D' ? 1 : 0
-  home.lost += hr === 'L' ? 1 : 0
-  away.won += ar === 'W' ? 1 : 0
-  away.drawn += ar === 'D' ? 1 : 0
-  away.lost += ar === 'L' ? 1 : 0
-  home.form.push(hr)
-  away.form.push(ar)
-  home.homeForm.push(hr)
-  away.awayForm.push(ar)
-  table.set(home.name, home)
-  table.set(away.name, away)
+  home.won += hr === 'W' ? 1 : 0; home.drawn += hr === 'D' ? 1 : 0; home.lost += hr === 'L' ? 1 : 0
+  away.won += ar === 'W' ? 1 : 0; away.drawn += ar === 'D' ? 1 : 0; away.lost += ar === 'L' ? 1 : 0
+  home.form.push(hr); away.form.push(ar); home.homeForm.push(hr); away.awayForm.push(ar)
+  table.set(home.name, home); table.set(away.name, away)
 }
 
 function teamSnapshot(table, teamName, venue, fallback = {}) {
@@ -228,14 +216,13 @@ async function ensureDailyGameFixtures(supabase, dailyGame) {
   }
 }
 
-async function ensureDailyGame(supabase, gameDate, league, cycle) {
+async function ensureDailyGame(supabase, gameDate, league) {
   const existing = await checked('daily game lookup', supabase
     .from('daily_games')
     .select('*, seasons(*)')
     .eq('game_date', gameDate)
     .eq('country', league.country)
     .eq('competition', league.competition)
-    .eq('cycle_key', cycle.cycleKey)
     .maybeSingle())
   if (existing.data) {
     await ensureDailyGameFixtures(supabase, existing.data)
@@ -249,18 +236,10 @@ async function ensureDailyGame(supabase, gameDate, league, cycle) {
     .eq('is_complete', true)
     .order('code'))
   if (!seasons.data?.length) throw new Error(`No complete seasons imported for ${league.country} - ${league.leagueName}`)
-  const season = shuffle(seasons.data, `season:${cycle.cycleKey}:${league.country}:${league.competition}`)[0]
+  const season = shuffle(seasons.data, `season:${gameDate}:${league.country}:${league.competition}`)[0]
   const created = await checked('daily game insert', supabase
     .from('daily_games')
-    .insert({
-      game_date: gameDate,
-      cycle_key: cycle.cycleKey,
-      country: league.country,
-      competition: league.competition,
-      league_name: league.leagueName,
-      season_id: season.id,
-      seed: `daily:${cycle.cycleKey}:${league.country}:${league.competition}:${season.code}`,
-    })
+    .insert({ game_date: gameDate, country: league.country, competition: league.competition, league_name: league.leagueName, season_id: season.id, seed: `daily:${gameDate}:${league.country}:${league.competition}:${season.code}` })
     .select('*, seasons(*)')
     .single())
   await ensureDailyGameFixtures(supabase, created.data)
@@ -305,8 +284,7 @@ export async function handler(event) {
     const { profile, league } = await ensureProfile(supabase, user)
     const seasonLength = tierSeasonLength(profile.pyramid_level)
     const gameDate = londonDate()
-    const cycle = currentGameCycle(gameDate)
-    const dailyGame = await ensureDailyGame(supabase, gameDate, league, cycle)
+    const dailyGame = await ensureDailyGame(supabase, gameDate, league)
     const rounds = await checked('rounds lookup', supabase
       .from('daily_game_fixtures')
       .select('id, round_number, options, fixtures(*)')
@@ -402,9 +380,6 @@ export async function handler(event) {
 
     return json(200, {
       gameDate,
-      cycleKey: cycle.cycleKey,
-      testMode: cycle.isTestMode,
-      testSeasonMinutes: cycle.minutes,
       country: league.country,
       competition: league.competition,
       leagueName: league.leagueName,
