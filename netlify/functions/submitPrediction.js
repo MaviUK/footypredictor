@@ -27,6 +27,11 @@ function outcomeFor(points) {
   }
 }
 
+function normaliseInteger(value) {
+  const number = Number(value)
+  return Number.isInteger(number) ? number : null
+}
+
 export async function handler(event) {
   try {
     if (event.httpMethod !== 'POST') {
@@ -36,9 +41,11 @@ export async function handler(event) {
     const supabase = getSupabase()
     const user = await getUser(event, supabase)
     const body = JSON.parse(event.body || '{}')
-    const { dailyGameFixtureId, homeGoals, awayGoals } = body
+    const dailyGameFixtureId = body.dailyGameFixtureId
+    const homeGoals = normaliseInteger(body.homeGoals ?? body.predictedHomeGoals)
+    const awayGoals = normaliseInteger(body.awayGoals ?? body.predictedAwayGoals)
 
-    if (!dailyGameFixtureId || !Number.isInteger(homeGoals) || !Number.isInteger(awayGoals)) {
+    if (!dailyGameFixtureId || homeGoals === null || awayGoals === null) {
       return json(400, { error: 'Missing dailyGameFixtureId, homeGoals or awayGoals' })
     }
 
