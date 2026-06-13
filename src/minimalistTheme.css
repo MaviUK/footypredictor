@@ -1,21 +1,19 @@
 :root {
   --clean-bg: #07110c;
-  --clean-surface: #0e1a13;
-  --clean-surface-2: #12251a;
-  --clean-surface-3: #182f21;
-  --clean-card: #101f17;
-  --clean-text: #edf7ef;
-  --clean-muted: #a9baad;
-  --clean-border: #294534;
-  --clean-accent: #9fe6ad;
-  --clean-accent-soft: #1d3b28;
-  --clean-accent-text: #e9f9ed;
-  --clean-danger: #8f3d48;
-  --clean-danger-soft: #2b171b;
-  --clean-draw: #6f7a73;
-  --clean-draw-soft: #1d2521;
-  --clean-warning: #b99b4a;
-  --clean-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  --clean-panel: #0f1b14;
+  --clean-panel-2: #132219;
+  --clean-border: #263a2d;
+  --clean-text: #f1f7f2;
+  --clean-muted: #a8b6ac;
+  --clean-button: #2f6f42;
+  --clean-button-text: #f4fff6;
+  --clean-table-bg: #f5f8f4;
+  --clean-table-head: #e2ebe3;
+  --clean-table-text: #122017;
+  --clean-accent: #79c889;
+  --clean-red: #a84a56;
+  --clean-red-bg: #2a171b;
+  --clean-grey: #79847c;
 }
 
 body,
@@ -27,8 +25,8 @@ body,
 }
 
 .app-shell {
-  width: min(1040px, calc(100% - 28px)) !important;
-  padding: 16px 0 40px !important;
+  width: min(1040px, calc(100% - 24px)) !important;
+  padding: 14px 0 36px !important;
 }
 
 .hero,
@@ -38,11 +36,11 @@ body,
 .season-summary,
 .archive-section,
 .archive-summary-card {
-  background: var(--clean-surface) !important;
+  background: var(--clean-panel) !important;
   color: var(--clean-text) !important;
   border: 1px solid var(--clean-border) !important;
-  border-radius: 22px !important;
-  box-shadow: var(--clean-shadow) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
 }
 
 .hero,
@@ -85,10 +83,10 @@ button,
 .result-column button,
 .club-name-button,
 .daily-table-button {
-  background: var(--clean-accent-soft) !important;
-  color: var(--clean-accent-text) !important;
-  border: 1px solid #345c40 !important;
-  border-radius: 999px !important;
+  background: var(--clean-button) !important;
+  color: var(--clean-button-text) !important;
+  border: 1px solid #3d7d4d !important;
+  border-radius: 8px !important;
   box-shadow: none !important;
   font-weight: 850 !important;
 }
@@ -96,12 +94,12 @@ button,
 button:hover,
 .daily-table-button:hover,
 .explore-club-card:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.06);
 }
 
 button:disabled {
   background: #17231c !important;
-  color: #66756a !important;
+  color: #6c796f !important;
   border-color: #25342a !important;
 }
 
@@ -113,17 +111,17 @@ button:disabled {
 
 input,
 select {
-  background: #0d1711 !important;
+  background: #0b150f !important;
   color: var(--clean-text) !important;
   border: 1px solid var(--clean-border) !important;
-  border-radius: 14px !important;
+  border-radius: 6px !important;
   box-shadow: none !important;
 }
 
 input:focus,
 select:focus,
 button:focus-visible {
-  outline: 3px solid rgba(159, 230, 173, 0.2) !important;
+  outline: 2px solid rgba(121, 200, 137, 0.35) !important;
   outline-offset: 2px !important;
 }
 
@@ -137,29 +135,31 @@ button:focus-visible {
 }
 
 .alert {
-  background: var(--clean-danger-soft) !important;
-  color: #f7d9dd !important;
-  border: 1px solid rgba(143, 61, 72, 0.55) !important;
+  background: var(--clean-red-bg) !important;
+  color: #f5d9dd !important;
+  border: 1px solid rgba(168, 74, 86, 0.6) !important;
+  border-radius: 8px !important;
   box-shadow: none !important;
 }
 
 .result-notice {
-  background: var(--clean-surface-2) !important;
+  background: var(--clean-panel-2) !important;
   color: var(--clean-text) !important;
   border: 1px solid var(--clean-border) !important;
-  border-radius: 18px !important;
+  border-radius: 8px !important;
   box-shadow: none !important;
   margin: 10px 0 12px !important;
   padding: 12px 14px !important;
 }
 
 .result-notice strong {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255,255,255,0.08) !important;
+  border-radius: 6px !important;
 }
 
-.result-notice.outcome-W { border-color: rgba(82, 160, 103, 0.55) !important; }
-.result-notice.outcome-D { border-color: rgba(111, 122, 115, 0.55) !important; }
-.result-notice.outcome-L { border-color: rgba(143, 61, 72, 0.65) !important; }
+.result-notice.outcome-W { border-color: rgba(121, 200, 137, 0.55) !important; }
+.result-notice.outcome-D { border-color: rgba(121, 132, 124, 0.55) !important; }
+.result-notice.outcome-L { border-color: rgba(168, 74, 86, 0.65) !important; }
 
 .user-results {
   padding: 14px !important;
@@ -169,43 +169,44 @@ button:focus-visible {
 .form-chip,
 .archive-status {
   box-shadow: none !important;
-  border-radius: 999px !important;
+  border-radius: 4px !important;
 }
 
 .user-result-chip.outcome-W,
 .form-chip.win,
 .archive-status.promoted {
-  background: #4e9e68 !important;
+  background: #5ba86d !important;
   color: #07110c !important;
 }
 
 .user-result-chip.outcome-D,
 .form-chip.draw {
-  background: var(--clean-draw) !important;
+  background: var(--clean-grey) !important;
   color: #07110c !important;
 }
 
 .user-result-chip.outcome-L,
 .form-chip.loss,
 .archive-status.relegated {
-  background: var(--clean-danger) !important;
+  background: var(--clean-red) !important;
   color: #fff0f2 !important;
 }
 
 .archive-status.champion {
-  background: var(--clean-warning) !important;
+  background: #b99b4a !important;
   color: #17150b !important;
 }
 
 .fixture-date {
   border-top: 1px solid var(--clean-border) !important;
-  padding-top: 14px !important;
+  padding-top: 12px !important;
   margin-top: 4px !important;
 }
 
 .match-title span {
-  background: var(--clean-surface-3) !important;
+  background: var(--clean-panel-2) !important;
   color: var(--clean-text) !important;
+  border-radius: 6px !important;
 }
 
 .scoreboard,
@@ -214,27 +215,77 @@ button:focus-visible {
 .best-worst-grid,
 .explore-club-grid,
 .game-layout {
-  gap: 12px !important;
+  gap: 10px !important;
 }
 
-.team-card,
+.team-card {
+  background: var(--clean-table-bg) !important;
+  color: var(--clean-table-text) !important;
+  border: 1px solid #d4ded5 !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.team-heading h3,
+.team-heading span {
+  color: var(--clean-table-text) !important;
+}
+
+.team-heading span,
+.form-label,
+.explore-club-card small {
+  color: #5f6c62 !important;
+}
+
 .league-strip,
-.compact-league-strip,
+.compact-league-strip {
+  display: block !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  color: var(--clean-table-text) !important;
+  border: 1px solid #d4ded5 !important;
+  border-radius: 6px !important;
+}
+
+.league-labels,
+.league-values {
+  display: grid !important;
+  grid-template-columns: 1.1fr repeat(8, 1fr) !important;
+  min-height: 28px !important;
+  visibility: visible !important;
+}
+
+.league-labels span {
+  display: block !important;
+  background: var(--clean-table-head) !important;
+  color: #54625a !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+}
+
+.league-values strong,
+.league-values span {
+  display: block !important;
+  color: var(--clean-table-text) !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+}
+
+.league-values strong {
+  color: #1f7b46 !important;
+}
+
 .daily-table-row,
 .profile-history-row,
 .explore-club-card,
 .archive-row,
 .archive-fixture-row {
-  background: var(--clean-card) !important;
-  color: var(--clean-text) !important;
-  border: 1px solid var(--clean-border) !important;
-  border-radius: 18px !important;
+  background: var(--clean-table-bg) !important;
+  color: var(--clean-table-text) !important;
+  border: 1px solid #d4ded5 !important;
+  border-radius: 6px !important;
 }
 
-.team-heading h3,
-.team-heading span,
-.league-values strong,
-.league-values span,
 .daily-table-row strong,
 .daily-table-row span,
 .profile-history-row strong,
@@ -244,60 +295,52 @@ button:focus-visible {
 .archive-row span,
 .archive-row strong,
 .archive-fixture-row span,
-.archive-fixture-row strong,
-.daily-table-button span,
-.daily-table-button strong {
-  color: var(--clean-text) !important;
+.archive-fixture-row strong {
+  color: var(--clean-table-text) !important;
 }
 
-.team-heading span,
-.form-label,
-.league-labels span,
-.explore-club-card small {
-  color: var(--clean-muted) !important;
-}
-
-.league-labels span,
 .daily-table-head,
 .profile-history-head,
 .archive-head-row {
-  background: var(--clean-surface-2) !important;
-  color: var(--clean-muted) !important;
+  background: var(--clean-table-head) !important;
+  color: #54625a !important;
 }
 
-.league-values strong {
-  color: var(--clean-accent) !important;
+.daily-table-button span,
+.daily-table-button strong {
+  color: var(--clean-button-text) !important;
 }
 
 .option-grid button.selected-choice,
 .result-column button.selected-choice {
-  background: var(--clean-surface-3) !important;
-  color: var(--clean-accent-text) !important;
+  background: #3b7f4c !important;
+  color: #ffffff !important;
   outline: 0 !important;
-  box-shadow: 0 0 0 4px rgba(159, 230, 173, 0.14) !important;
+  box-shadow: 0 0 0 3px rgba(121, 200, 137, 0.18) !important;
   transform: none !important;
 }
 
 .club-badge,
 .mini-badge {
-  background: var(--clean-surface-2) !important;
+  background: var(--clean-panel-2) !important;
   color: var(--clean-text) !important;
   border: 1px solid var(--clean-border) !important;
+  border-radius: 8px !important;
 }
 
-.archive-row.promoted { box-shadow: inset 5px 0 0 #4e9e68 !important; }
-.archive-row.relegated { box-shadow: inset 5px 0 0 var(--clean-danger) !important; }
-.archive-row.champion { box-shadow: inset 5px 0 0 var(--clean-warning) !important; }
+.archive-row.promoted { box-shadow: inset 4px 0 0 #5ba86d !important; }
+.archive-row.relegated { box-shadow: inset 4px 0 0 var(--clean-red) !important; }
+.archive-row.champion { box-shadow: inset 4px 0 0 #b99b4a !important; }
 
 @media (max-width: 520px) {
   .app-shell {
-    width: min(100% - 16px, 1040px) !important;
+    width: min(100% - 14px, 1040px) !important;
     padding-top: 10px !important;
   }
 
   .panel,
   .hero {
-    border-radius: 20px !important;
+    border-radius: 8px !important;
     padding: 12px !important;
     margin-bottom: 10px !important;
   }
@@ -316,7 +359,7 @@ button:focus-visible {
   }
 
   .team-card {
-    border-radius: 18px !important;
+    border-radius: 8px !important;
     padding: 10px !important;
   }
 
