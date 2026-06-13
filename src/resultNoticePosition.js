@@ -13,7 +13,27 @@ function moveResultNoticeBelowResults() {
   }
 }
 
+function removeDuplicateArchiveButtons() {
+  try {
+    const nav = document.querySelector('.topbar-actions')
+    if (!nav) return
+
+    const archiveButtons = Array.from(nav.querySelectorAll('button')).filter((button) => button.textContent.trim().toLowerCase() === 'archive')
+    archiveButtons.forEach((button, index) => {
+      button.hidden = index > 0
+      button.style.display = index > 0 ? 'none' : ''
+    })
+  } catch (error) {
+    console.warn('Archive button cleanup skipped', error)
+  }
+}
+
+function tidyUi() {
+  moveResultNoticeBelowResults()
+  removeDuplicateArchiveButtons()
+}
+
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  window.addEventListener('load', moveResultNoticeBelowResults)
-  window.setInterval(moveResultNoticeBelowResults, 500)
+  window.addEventListener('load', tidyUi)
+  window.setInterval(tidyUi, 500)
 }
